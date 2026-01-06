@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  # PostgreSQL with TimescaleDB extension for time-series data
+  db:
+    image: timescale/timescaledb:latest-pg15
+    container_name: autopulse_db
+    environment:
+      POSTGRES_USER: autopulse
+      POSTGRES_PASSWORD: autopulse_secret
+      POSTGRES_DB: autopulse
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U autopulse"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:

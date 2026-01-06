@@ -1,0 +1,7 @@
+# This file ensures the models/ directory is tracked by git
+# Add your trained models here:
+# - eye_classifier.pth (eye drowsiness classifier)
+# - drowsiness_mobilenetv2.pth (if using MobileNet approach)
+#
+# Models are excluded from git via .gitignore to avoid large file commits
+# Consider using Git LFS for model versioning, or store models externally

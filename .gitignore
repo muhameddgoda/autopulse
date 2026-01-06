@@ -1,0 +1,45 @@
+# AutoPulse .gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.env
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+.npm
+npm-debug.log*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+*.log
+*.sqlite
+postgres_data/
+
+# ML models
+*.joblib
+*.h5
+*.pkl
+
+# Test
+.coverage
+htmlcov/
+.pytest_cache/
+dataset/
+eye_dataset/

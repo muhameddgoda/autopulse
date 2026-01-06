@@ -1,0 +1,40 @@
+{
+  "trained_at": "2026-01-05T02:28:38.724995",
+  "n_samples": 200,
+  "n_train": 160,
+  "n_test": 40,
+  "accuracy": 0.925,
+  "cv_mean": 0.945,
+  "cv_std": 0.018708286933869677,
+  "algorithm": "random_forest",
+  "feature_importance": {
+    "harsh_brake_count": 0.12754571195208472,
+    "harsh_brake_rate": 0.09801000415945081,
+    "avg_acceleration_g": 0.07577655726428963,
+    "engine_stress_avg": 0.06988851809715935,
+    "max_speed_kmh": 0.06936164238350816,
+    "mode_sport_percent": 0.06679982804532802,
+    "max_deceleration_g": 0.06300110389971725,
+    "max_acceleration_g": 0.050093743586211395,
+    "max_rpm": 0.04428273330317279,
+    "harsh_accel_count": 0.0438675842257389,
+    "high_throttle_percentage": 0.04044254635241695,
+    "avg_rpm": 0.03905097454423788,
+    "avg_speed_kmh": 0.02967840567014857,
+    "avg_throttle": 0.028361277056140922,
+    "speed_std_dev": 0.02634283422722151,
+    "speeding_percentage": 0.024939309674045965,
+    "harsh_accel_rate": 0.024899610459278358,
+    "efficient_rpm_percentage": 0.024597286470867515,
+    "distance_km": 0.0245105653729844,
+    "over_rpm_percentage": 0.016421693282134154,
+    "duration_seconds": 0.012128069973862758,
+    "idle_percentage": 0.0
+  },
+  "classes": [
+    "dangerous",
+    "calm",
+    "aggressive",
+    "normal"
+  ]
+}
