@@ -170,7 +170,7 @@ export default function App() {
         </div>
 
         {/* Bottom info bar (optional - timestamp) */}
-        <div className="absolute bottom-3 left-0 right-0 flex justify-center">
+        <div className="absolute bottom-3 left-0 right-10 flex justify-center">
           <div className="text-[10px] text-gray-600 font-mono">
             {telemetry?.time
               ? new Date(telemetry.time).toLocaleTimeString()
