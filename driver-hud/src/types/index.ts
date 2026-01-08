@@ -1,3 +1,7 @@
+// ============================================
+// AUTOPULSE TYPE DEFINITIONS
+// ============================================
+
 export interface Vehicle {
   id: string;
   vin: string;
@@ -28,6 +32,11 @@ export interface TelemetryReading {
   longitude: number | null;
   heading: number | null;
   driving_mode: DrivingMode | null;
+  // ML metrics
+  acceleration_g?: number;
+  is_harsh_braking?: boolean;
+  is_harsh_acceleration?: boolean;
+  engine_stress_score?: number;
 }
 
 export type DrivingMode = 'parked' | 'reverse' | 'city' | 'highway' | 'sport';
@@ -39,85 +48,55 @@ export interface WebSocketMessage {
   message?: string;
 }
 
+// Sensor data point for charts
+export interface SensorDataPoint {
+  time: number;
+  value: number;
+}
+
+export interface SensorHistory {
+  engine_temp: SensorDataPoint[];
+  oil_temp: SensorDataPoint[];
+  oil_pressure: SensorDataPoint[];
+  battery_voltage: SensorDataPoint[];
+  fuel_level: SensorDataPoint[];
+}
+
+// Warning thresholds
+export const THRESHOLDS = {
+  engine_temp: { warning: 100, critical: 110, min: 0, max: 130 },
+  oil_temp: { warning: 120, critical: 140, min: 0, max: 160 },
+  oil_pressure: { low: 1.5, critical: 1.0, min: 0, max: 6 },
+  fuel_level: { warning: 15, critical: 5, min: 0, max: 100 },
+  battery_voltage: { low: 12.2, critical: 11.8, min: 10, max: 15 },
+  rpm: { warning: 7000, redline: 7500, min: 0, max: 8000 },
+  tire_pressure: { low: 30, critical: 28, min: 20, max: 40 },
+} as const;
+
+// Theme colors
+export const THEME = {
+  orange: '#f97316',
+  orangeDim: '#f9731630',
+  orangeGlow: '#f9731640',
+  red: '#ef4444',
+  redDim: '#ef444430',
+  yellow: '#f59e0b',
+  green: '#22c55e',
+  purple: '#a855f7',
+  background: '#0d0d0d',
+  cardBg: '#1a1a1a',
+  border: '#333',
+  textDim: '#666',
+  textMuted: '#999',
+} as const;
+
+// Helper functions
 export const getGearDisplay = (gear: number): string => {
   if (gear === -1) return 'R';
   if (gear === 0) return 'N';
   return gear.toString();
 };
 
-// Mode theme configurations
-export interface ModeTheme {
-  name: string;
-  bgGradient: string;
-  primaryColor: string;
-  secondaryColor: string;
-  accentColor: string;
-  glowColor: string;
-  textColor: string;
-  icon: string;
-}
-
-export const MODE_THEMES: Record<DrivingMode, ModeTheme> = {
-  parked: {
-    name: 'PARKED',
-    bgGradient: 'from-gray-950 via-gray-900 to-gray-950',
-    primaryColor: '#6b7280',
-    secondaryColor: '#374151',
-    accentColor: '#9ca3af',
-    glowColor: 'rgba(107, 114, 128, 0.3)',
-    textColor: '#9ca3af',
-    icon: '🅿️',
-  },
-  reverse: {
-    name: 'REVERSE',
-    bgGradient: 'from-purple-950 via-gray-900 to-purple-950',
-    primaryColor: '#a855f7',
-    secondaryColor: '#7c3aed',
-    accentColor: '#c084fc',
-    glowColor: 'rgba(168, 85, 247, 0.3)',
-    textColor: '#c084fc',
-    icon: '🔄',
-  },
-  city: {
-    name: 'CITY',
-    bgGradient: 'from-cyan-950 via-gray-900 to-teal-950',
-    primaryColor: '#06b6d4',
-    secondaryColor: '#0891b2',
-    accentColor: '#22d3ee',
-    glowColor: 'rgba(6, 182, 212, 0.3)',
-    textColor: '#22d3ee',
-    icon: '🏙️',
-  },
-  highway: {
-    name: 'HIGHWAY',
-    bgGradient: 'from-blue-950 via-gray-900 to-slate-950',
-    primaryColor: '#3b82f6',
-    secondaryColor: '#1d4ed8',
-    accentColor: '#60a5fa',
-    glowColor: 'rgba(59, 130, 246, 0.3)',
-    textColor: '#60a5fa',
-    icon: '🛣️',
-  },
-  sport: {
-    name: 'SPORT',
-    bgGradient: 'from-orange-950 via-red-950 to-orange-950',
-    primaryColor: '#f97316',
-    secondaryColor: '#ea580c',
-    accentColor: '#fb923c',
-    glowColor: 'rgba(249, 115, 22, 0.4)',
-    textColor: '#fb923c',
-    icon: '🔥',
-  },
-};
-
-// Warning thresholds
-export const WARNINGS = {
-  fuel_low: 15,
-  fuel_critical: 5,
-  rpm_warning: 7000,
-  rpm_redline: 7500,
-  oil_pressure_low: 1.5,
-  oil_pressure_critical: 1.0,
-  engine_temp_warning: 105,
-  engine_temp_critical: 115,
+export const formatNumber = (value: number, decimals: number = 0): string => {
+  return value.toFixed(decimals);
 };
