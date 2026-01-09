@@ -1,6 +1,8 @@
 """
-AutoPulse Telemetry Models
+AutoPulse Telemetry Models (Updated)
 SQLAlchemy models for vehicles, telemetry readings, and trips
+
+UPDATED: Added driver scoring fields to Trip model
 """
 
 from datetime import datetime
@@ -28,7 +30,7 @@ class Vehicle(Base):
     telemetry_readings: Mapped[list["TelemetryReading"]] = relationship(back_populates="vehicle")
     trips: Mapped[list["Trip"]] = relationship(back_populates="vehicle")
     
-    # In the Vehicle class
+    # Safety relationships
     safety_events = relationship("SafetyEvent", back_populates="vehicle")
     safety_sessions = relationship("SafetySession", back_populates="vehicle")
 
@@ -94,7 +96,7 @@ class TelemetryReading(Base):
 
 
 class Trip(Base):
-    """A driving trip/journey with detailed analytics"""
+    """A driving trip/journey with detailed analytics and driver scoring"""
     __tablename__ = "trips"
     
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
@@ -140,16 +142,31 @@ class Trip(Base):
     speed_sum: Mapped[float | None] = mapped_column(Float, default=0)
     rpm_sum: Mapped[float | None] = mapped_column(Float, default=0)
     
+    # ========================================
+    # NEW: Driver Behavior Scoring Fields
+    # ========================================
+    driver_score: Mapped[float | None] = mapped_column(Float)  # 0-100
+    behavior_label: Mapped[str | None] = mapped_column(String(20))  # exemplary, calm, normal, aggressive, dangerous
+    risk_level: Mapped[str | None] = mapped_column(String(20))  # low, medium, high, critical
+    
+    # Event counters (for quick display without recalculating)
+    harsh_brake_count: Mapped[int | None] = mapped_column(Integer, default=0)
+    harsh_accel_count: Mapped[int | None] = mapped_column(Integer, default=0)
+    speeding_percentage: Mapped[float | None] = mapped_column(Float, default=0)
+    
+    # ML enhancement flag
+    ml_enhanced: Mapped[bool | None] = mapped_column(Boolean, default=False)
+    # ========================================
+    
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
     vehicle: Mapped["Vehicle"] = relationship(back_populates="trips")
-    
     safety_events = relationship("SafetyEvent", back_populates="trip")
     safety_session = relationship("SafetySession", back_populates="trip")
     
-    
     def __repr__(self) -> str:
         status = "active" if self.is_active else "completed"
-        return f"<Trip {self.id} {status} distance={self.distance_km}km>"
+        score_str = f" score={self.driver_score}" if self.driver_score else ""
+        return f"<Trip {self.id} {status} distance={self.distance_km}km{score_str}>"

@@ -1,31 +1,31 @@
-import { useState, useEffect } from 'react';
-import { 
-  Gauge, 
-  Thermometer, 
-  Droplets, 
-  Battery, 
-  Fuel, 
+import { useState, useEffect } from "react";
+import {
+  Gauge,
+  Thermometer,
+  Droplets,
+  Battery,
+  Fuel,
   Activity,
   Wifi,
   WifiOff,
   Car,
-  Navigation
-} from 'lucide-react';
-import { useTelemetry } from '../hooks/useTelemetry';
-import { vehicleApi } from '../lib/api';
-import { Vehicle, getGearDisplay, THRESHOLDS, getStatus } from '../types';
-import { 
-  cn, 
-  formatSpeed, 
-  formatRPM, 
-  formatTemp, 
-  formatPressure, 
-  formatVoltage, 
+  Navigation,
+} from "lucide-react";
+import { useTelemetry } from "../hooks/useTelemetry";
+import { vehicleApi } from "../lib/api";
+import { Vehicle, getGearDisplay, THRESHOLDS, getStatus } from "../types";
+import {
+  cn,
+  formatSpeed,
+  formatRPM,
+  formatTemp,
+  formatPressure,
+  formatVoltage,
   formatPercent,
   getStatusColor,
-  calculatePercentage
-} from '../lib/utils';
-import LiveMap from '../components/LiveMap';
+  calculatePercentage,
+} from "../lib/utils";
+import LiveMap from "../components/LiveMap";
 
 // Compact Gauge Component
 interface GaugeDisplayProps {
@@ -34,19 +34,30 @@ interface GaugeDisplayProps {
   unit?: string;
   icon: React.ReactNode;
   percentage?: number;
-  status?: 'normal' | 'warning' | 'critical';
+  status?: "normal" | "warning" | "critical";
 }
 
-function GaugeDisplay({ label, value, unit, icon, percentage, status = 'normal' }: GaugeDisplayProps) {
+function GaugeDisplay({
+  label,
+  value,
+  unit,
+  icon,
+  percentage,
+  status = "normal",
+}: GaugeDisplayProps) {
   return (
     <div className="bg-porsche-gray-800 rounded-xl border border-porsche-gray-700 p-4">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-porsche-gray-400 text-xs font-medium">{label}</span>
-        <span className={cn('opacity-60', getStatusColor(status))}>{icon}</span>
+        <span className="text-porsche-gray-400 text-xs font-medium">
+          {label}
+        </span>
+        <span className={cn("opacity-60", getStatusColor(status))}>{icon}</span>
       </div>
-      
+
       <div className="flex items-baseline gap-1">
-        <span className={cn('text-2xl font-bold font-mono', getStatusColor(status))}>
+        <span
+          className={cn("text-2xl font-bold font-mono", getStatusColor(status))}
+        >
           {value}
         </span>
         {unit && <span className="text-porsche-gray-500 text-xs">{unit}</span>}
@@ -54,11 +65,14 @@ function GaugeDisplay({ label, value, unit, icon, percentage, status = 'normal' 
 
       {percentage !== undefined && (
         <div className="mt-2 h-1 bg-porsche-gray-700 rounded-full overflow-hidden">
-          <div 
+          <div
             className={cn(
-              'h-full rounded-full transition-all duration-300',
-              status === 'critical' ? 'bg-red-500' : 
-              status === 'warning' ? 'bg-yellow-500' : 'bg-green-500'
+              "h-full rounded-full transition-all duration-300",
+              status === "critical"
+                ? "bg-red-500"
+                : status === "warning"
+                ? "bg-yellow-500"
+                : "bg-green-500"
             )}
             style={{ width: `${Math.min(100, percentage)}%` }}
           />
@@ -77,46 +91,52 @@ interface SpeedOverlayProps {
 
 function SpeedOverlay({ speed, rpm, gear }: SpeedOverlayProps) {
   const isRedline = rpm >= 7500;
-  
+
   return (
     <div className="absolute top-4 left-4 z-[1000] flex flex-col gap-2">
       {/* Speed */}
       <div className="bg-black/80 backdrop-blur-sm rounded-xl px-6 py-4">
         <div className="text-porsche-gray-400 text-xs mb-1">SPEED</div>
         <div className="flex items-baseline">
-          <span className="text-6xl font-bold font-mono text-white">{formatSpeed(speed)}</span>
+          <span className="text-6xl font-bold font-mono text-white">
+            {formatSpeed(speed)}
+          </span>
           <span className="text-porsche-gray-400 text-lg ml-2">km/h</span>
         </div>
       </div>
-      
+
       {/* RPM */}
       <div className="bg-black/80 backdrop-blur-sm rounded-xl px-6 py-3">
         <div className="text-porsche-gray-400 text-xs mb-1">RPM</div>
-        <div className={cn(
-          'text-4xl font-bold font-mono',
-          isRedline ? 'text-red-500' : 'text-white'
-        )}>
+        <div
+          className={cn(
+            "text-4xl font-bold font-mono",
+            isRedline ? "text-red-500" : "text-white"
+          )}
+        >
           {formatRPM(rpm)}
         </div>
         {/* RPM Bar */}
         <div className="mt-2 h-1.5 bg-porsche-gray-700 rounded-full overflow-hidden w-48">
-          <div 
+          <div
             className={cn(
-              'h-full rounded-full transition-all duration-100',
-              isRedline ? 'bg-red-500' : 'bg-porsche-red'
+              "h-full rounded-full transition-all duration-100",
+              isRedline ? "bg-red-500" : "bg-porsche-red"
             )}
             style={{ width: `${(rpm / 8500) * 100}%` }}
           />
         </div>
       </div>
-      
+
       {/* Gear */}
       <div className="bg-black/80 backdrop-blur-sm rounded-xl px-6 py-3">
         <div className="text-porsche-gray-400 text-xs mb-1">GEAR</div>
-        <div className={cn(
-          'text-5xl font-bold font-mono',
-          gear === -1 ? 'text-yellow-500' : 'text-white'
-        )}>
+        <div
+          className={cn(
+            "text-5xl font-bold font-mono",
+            gear === -1 ? "text-yellow-500" : "text-white"
+          )}
+        >
           {getGearDisplay(gear)}
         </div>
       </div>
@@ -126,21 +146,47 @@ function SpeedOverlay({ speed, rpm, gear }: SpeedOverlayProps) {
 
 // Connection Status Badge
 interface ConnectionStatusProps {
-  status: 'connecting' | 'connected' | 'disconnected' | 'error';
+  status: "connecting" | "connected" | "disconnected" | "error";
 }
 
 function ConnectionStatus({ status }: ConnectionStatusProps) {
   const statusConfig = {
-    connecting: { color: 'text-yellow-500', bg: 'bg-yellow-500/20', icon: <Wifi className="w-4 h-4 animate-pulse" />, text: 'Connecting...' },
-    connected: { color: 'text-green-500', bg: 'bg-green-500/20', icon: <Wifi className="w-4 h-4" />, text: 'Live' },
-    disconnected: { color: 'text-gray-500', bg: 'bg-gray-500/20', icon: <WifiOff className="w-4 h-4" />, text: 'Disconnected' },
-    error: { color: 'text-red-500', bg: 'bg-red-500/20', icon: <WifiOff className="w-4 h-4" />, text: 'Error' },
+    connecting: {
+      color: "text-yellow-500",
+      bg: "bg-yellow-500/20",
+      icon: <Wifi className="w-4 h-4 animate-pulse" />,
+      text: "Connecting...",
+    },
+    connected: {
+      color: "text-green-500",
+      bg: "bg-green-500/20",
+      icon: <Wifi className="w-4 h-4" />,
+      text: "Live",
+    },
+    disconnected: {
+      color: "text-gray-500",
+      bg: "bg-gray-500/20",
+      icon: <WifiOff className="w-4 h-4" />,
+      text: "Disconnected",
+    },
+    error: {
+      color: "text-red-500",
+      bg: "bg-red-500/20",
+      icon: <WifiOff className="w-4 h-4" />,
+      text: "Error",
+    },
   };
 
   const config = statusConfig[status];
 
   return (
-    <div className={cn('flex items-center gap-2 px-3 py-1.5 rounded-full', config.bg, config.color)}>
+    <div
+      className={cn(
+        "flex items-center gap-2 px-3 py-1.5 rounded-full",
+        config.bg,
+        config.color
+      )}
+    >
       {config.icon}
       <span className="text-sm font-medium">{config.text}</span>
     </div>
@@ -161,7 +207,7 @@ export default function Dashboard() {
           setVehicle(vehicles[0]);
         }
       } catch (error) {
-        console.error('Failed to fetch vehicle:', error);
+        console.error("Failed to fetch vehicle:", error);
       } finally {
         setLoading(false);
       }
@@ -221,7 +267,7 @@ export default function Dashboard() {
             </p>
           </div>
         </div>
-        
+
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 text-porsche-gray-400 text-sm">
             <Navigation className="w-4 h-4" />
@@ -235,17 +281,22 @@ export default function Dashboard() {
       <div className="flex-1 grid grid-cols-12 gap-4 min-h-0">
         {/* Left: Live Map with Overlays */}
         <div className="col-span-8 relative rounded-xl overflow-hidden">
-          <LiveMap 
-            latitude={data.latitude ?? 48.8342}
-            longitude={data.longitude ?? 9.1519}
-            speed={data.speed_kmh}
+          <LiveMap
+            telemetry={{
+              latitude: data.latitude ?? 48.8342,
+              longitude: data.longitude ?? 9.1519,
+              speed: data.speed_kmh,
+              heading: data.heading ?? 0,
+              mode: data.driving_mode ?? "city",
+              timestamp: new Date().toISOString(),
+            }}
           />
-          
+
           {/* Speed/RPM/Gear Overlay on Map */}
-          <SpeedOverlay 
-            speed={data.speed_kmh} 
-            rpm={data.rpm} 
-            gear={data.gear} 
+          <SpeedOverlay
+            speed={data.speed_kmh}
+            rpm={data.rpm}
+            gear={data.gear}
           />
         </div>
 
@@ -254,18 +305,30 @@ export default function Dashboard() {
           {/* Fuel - Large */}
           <div className="bg-porsche-gray-800 rounded-xl border border-porsche-gray-700 p-4">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-porsche-gray-400 text-sm font-medium">FUEL LEVEL</span>
-              <Fuel className={cn('w-5 h-5', getStatusColor(getStatus(data.fuel_level, THRESHOLDS.fuel_level)))} />
+              <span className="text-porsche-gray-400 text-sm font-medium">
+                FUEL LEVEL
+              </span>
+              <Fuel
+                className={cn(
+                  "w-5 h-5",
+                  getStatusColor(
+                    getStatus(data.fuel_level, THRESHOLDS.fuel_level)
+                  )
+                )}
+              />
             </div>
             <div className="text-4xl font-bold font-mono mb-2">
               {formatPercent(data.fuel_level)}
             </div>
             <div className="h-2 bg-porsche-gray-700 rounded-full overflow-hidden">
-              <div 
+              <div
                 className={cn(
-                  'h-full rounded-full transition-all',
-                  data.fuel_level < 15 ? 'bg-red-500' : 
-                  data.fuel_level < 30 ? 'bg-yellow-500' : 'bg-green-500'
+                  "h-full rounded-full transition-all",
+                  data.fuel_level < 15
+                    ? "bg-red-500"
+                    : data.fuel_level < 30
+                    ? "bg-yellow-500"
+                    : "bg-green-500"
                 )}
                 style={{ width: `${data.fuel_level}%` }}
               />
@@ -306,20 +369,33 @@ export default function Dashboard() {
           {/* Battery */}
           <div className="bg-porsche-gray-800 rounded-xl border border-porsche-gray-700 p-4">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-porsche-gray-400 text-sm font-medium">BATTERY</span>
-              <Battery className={cn('w-5 h-5', getStatusColor(getStatus(data.battery_voltage, THRESHOLDS.battery_voltage)))} />
+              <span className="text-porsche-gray-400 text-sm font-medium">
+                BATTERY
+              </span>
+              <Battery
+                className={cn(
+                  "w-5 h-5",
+                  getStatusColor(
+                    getStatus(data.battery_voltage, THRESHOLDS.battery_voltage)
+                  )
+                )}
+              />
             </div>
             <div className="flex items-baseline gap-2">
-              <span className="text-3xl font-bold font-mono">{formatVoltage(data.battery_voltage)}</span>
+              <span className="text-3xl font-bold font-mono">
+                {formatVoltage(data.battery_voltage)}
+              </span>
               <span className="text-porsche-gray-500 text-sm">
-                {data.battery_voltage > 13.5 ? 'Charging' : 'On Battery'}
+                {data.battery_voltage > 13.5 ? "Charging" : "On Battery"}
               </span>
             </div>
           </div>
 
           {/* Vehicle Info - Compact */}
           <div className="bg-porsche-gray-800 rounded-xl border border-porsche-gray-700 p-4 flex-1">
-            <span className="text-porsche-gray-400 text-sm font-medium">VEHICLE</span>
+            <span className="text-porsche-gray-400 text-sm font-medium">
+              VEHICLE
+            </span>
             <div className="mt-2 space-y-1.5 text-sm">
               <div className="flex justify-between">
                 <span className="text-porsche-gray-500">VIN</span>
@@ -331,8 +407,16 @@ export default function Dashboard() {
               </div>
               <div className="flex justify-between">
                 <span className="text-porsche-gray-500">Status</span>
-                <span className={connectionStatus === 'connected' ? 'text-green-500' : 'text-yellow-500'}>
-                  {connectionStatus === 'connected' ? 'Online' : 'Connecting...'}
+                <span
+                  className={
+                    connectionStatus === "connected"
+                      ? "text-green-500"
+                      : "text-yellow-500"
+                  }
+                >
+                  {connectionStatus === "connected"
+                    ? "Online"
+                    : "Connecting..."}
                 </span>
               </div>
             </div>

@@ -49,8 +49,11 @@ class BehaviorClassifier:
     
     CLASSES = ['exemplary', 'calm', 'normal', 'aggressive', 'dangerous']
     
-    def __init__(self, model_dir: str = "app/ml/trained_models"):
-        self.model_dir = Path(model_dir)
+    # Compute default model directory relative to this file
+    _DEFAULT_MODEL_DIR = Path(__file__).parent.parent / "trained_models"
+    
+    def __init__(self, model_dir: str=None):
+        self.model_dir = Path(model_dir) if model_dir else self._DEFAULT_MODEL_DIR
         self.model_dir.mkdir(parents=True, exist_ok=True)
         
         self.model = None
@@ -72,9 +75,9 @@ class BehaviorClassifier:
     def train(
         self,
         examples: List[TrainingExample],
-        algorithm: str = "random_forest",
-        test_size: float = 0.2,
-        random_state: int = 42
+        algorithm: str="random_forest",
+        test_size: float=0.2,
+        random_state: int=42
     ) -> Dict:
         """
         Train the behavior classifier
@@ -305,7 +308,7 @@ class BehaviorClassifier:
         X, _ = collector.prepare_features_matrix([example])
         return self.predict(X[0])
     
-    def save(self, filename: str = "behavior_classifier"):
+    def save(self, filename: str="behavior_classifier"):
         """Save trained model to disk"""
         if not self.is_trained:
             print("❌ No trained model to save")
@@ -325,7 +328,7 @@ class BehaviorClassifier:
         
         print(f"✅ Model saved to {self.model_dir}")
     
-    def load(self, filename: str = "behavior_classifier") -> bool:
+    def load(self, filename: str="behavior_classifier") -> bool:
         """Load trained model from disk"""
         model_path = self.model_dir / f"{filename}.joblib"
         scaler_path = self.model_dir / f"{filename}_scaler.joblib"

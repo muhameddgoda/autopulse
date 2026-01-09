@@ -2,119 +2,161 @@
 
 <div align="center">
 
-![AutoPulse Banner](docs/images/banner.png)
+**Your car, smarter. Real-time monitoring, safety alerts, and predictive maintenance.**
 
-**Real-time vehicle telemetry platform for Porsche 911**
-
-[![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://python.org)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green.svg)](https://fastapi.tiangolo.com)
-[![React](https://img.shields.io/badge/React-18+-61DAFB.svg)](https://reactjs.org)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5+-3178C6.svg)](https://typescriptlang.org)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-336791.svg)](https://postgresql.org)
-
-[Features](#features) • [Demo](#demo) • [Architecture](#architecture) • [Setup](#quick-start) • [Modules](#modules)
+[What is AutoPulse?](#-what-is-autopulse) • [Features](#-what-can-it-do) • [See it in Action](#-see-it-in-action) • [Technical Details](#-technical-details)
 
 </div>
 
 ---
 
-## 🎯 Overview
+## 🚗 What is AutoPulse?
 
-AutoPulse is a **connected car platform** that demonstrates real-time vehicle telemetry processing, visualization, and analytics. Built as a portfolio project showcasing skills in:
+Imagine having a **smart assistant for your car** that:
 
-- **Backend Development**: FastAPI, WebSockets, PostgreSQL
-- **Frontend Development**: React, TypeScript, Three.js, Recharts
-- **Real-time Systems**: WebSocket streaming, live data visualization
-- **Data Engineering**: Time-series data, analytics pipelines
-- **3D Visualization**: Interactive 3D car model with dynamic lighting
+- 📊 **Shows you everything** happening with your vehicle in real-time
+- 🔧 **Predicts problems** before they leave you stranded on the road
+- 👁️ **Watches your eyes** and alerts you if you're getting drowsy while driving
+- 📈 **Scores your driving** and helps you become a safer, more efficient driver
 
----
-
-## ✨ Features
-
-### 📊 Real-Time Dashboard
-- Live telemetry streaming via WebSocket
-- Mode-themed UI (City/Highway/Sport)
-- Interactive 3D Porsche 911 model
-- Dynamic warning system (Fuel, RPM, Oil, Temperature)
-
-### 🗺️ Live Map Tracking
-- Real-time GPS position updates
-- Speed overlay on map
-- Route visualization
-
-### 📈 Analytics & Charts
-- 60-second rolling telemetry history
-- Speed, RPM, Temperature, Throttle charts
-- Trip analytics with mode breakdown
-
-### 🚗 Trip Management
-- Auto-trip recording when driving
-- Mode breakdown (time in City/Highway/Sport)
-- Weekly statistics dashboard
-- CSV export for ML training
-
-### 🔔 Smart Alerts
-- Low fuel warning (< 15%)
-- RPM redline warning (> 7500)
-- Engine temperature alerts
-- Oil pressure monitoring
+AutoPulse is a **connected car platform** that brings Tesla-like intelligence to any vehicle. It's built as a demonstration of modern automotive software - the kind of technology used by Porsche, BMW, Mercedes, and other leading car manufacturers.
 
 ---
 
-## 🎬 Demo
+## ✨ What Can It Do?
 
-### Main Dashboard - Sport Mode
-![Sport Mode](docs/images/sport-mode.png)
+### 📊 Live Dashboard
+See your car's vital signs in real-time - speed, RPM, engine temperature, fuel level - all displayed on a beautiful dashboard with a **3D car model** that responds to your driving.
 
-### Trip Analytics
-![Trip Analytics](docs/images/trips.png)
+### 🔧 Predict Maintenance Needs
+Using **machine learning**, AutoPulse analyzes your driving patterns and vehicle data to predict when parts might need attention - before something breaks. No more surprise breakdowns!
 
-### Live Charts
-![Live Charts](docs/images/charts.png)
+### 👁️ Drowsiness Detection
+A camera watches your eyes while driving. If you start getting drowsy (eyes closing for too long), you'll get an **instant alert** - potentially saving your life. This uses the same AI technology found in modern luxury vehicles.
+
+### 🎨 Adaptive Themes
+The interface changes based on how you're driving:
+- 🏙️ **City Mode** (Calm cyan) - Urban driving
+- 🛣️ **Highway Mode** (Cool blue) - Cruising
+- 🔥 **Sport Mode** (Hot orange) - Spirited driving
+
+### 📈 Trip Analytics
+Every trip is recorded and analyzed. See your driving score, compare trips, and track your improvement over time.
+
+---
+
+## 🎬 See It In Action
+
+### Main Dashboard
+*Real-time vehicle monitoring with 3D visualization*
+
+![Dashboard](docs/images/dashboard.png)
+
+### Driver Safety Monitor
+*AI-powered drowsiness detection*
+
+![Safety](docs/images/safety-monitor.png)
+
+### Driver HUD
+*Minimal heads-up display for driving*
+
+![HUD](docs/images/hud.png)
+
+---
+
+## 🏆 Why I Built This
+
+This project demonstrates the skills that **German automotive companies** are looking for:
+
+| What Companies Need | How AutoPulse Shows It |
+|---------------------|------------------------|
+| Real-time systems | Live data streaming at 1Hz |
+| Machine Learning | Driver scoring with 92.7% accuracy |
+| Computer Vision | Eye tracking & drowsiness detection |
+| Full-stack development | React frontend + Python backend |
+| 3D visualization | Interactive Three.js car model |
+| Modern architecture | WebSockets, REST APIs, PostgreSQL |
+
+---
+
+# 🔧 Technical Details
+
+*For developers and technical reviewers*
+
+---
+
+## 📋 Tech Stack
+
+[![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-green.svg)](https://fastapi.tiangolo.com)
+[![React](https://img.shields.io/badge/React-18+-61DAFB.svg)](https://reactjs.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5+-3178C6.svg)](https://typescriptlang.org)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-336791.svg)](https://postgresql.org)
+[![MediaPipe](https://img.shields.io/badge/MediaPipe-CV-red.svg)](https://mediapipe.dev)
+[![XGBoost](https://img.shields.io/badge/XGBoost-ML-orange.svg)](https://xgboost.ai)
+
+| Layer | Technologies |
+|-------|--------------|
+| **Frontend** | React 18, TypeScript, Tailwind CSS, Three.js, Recharts, Leaflet |
+| **Backend** | FastAPI, SQLAlchemy, Pydantic, WebSockets |
+| **Database** | PostgreSQL 15 |
+| **ML** | XGBoost, scikit-learn, NumPy, Pandas |
+| **CV** | MediaPipe, OpenCV, PyTorch (MobileNetV2) |
+| **3D** | Three.js, React Three Fiber, GLTF models |
 
 ---
 
 ## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Frontend (React)                        │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐          │
-│  │Dashboard │ │   Map    │ │  Charts  │ │  Trips   │          │
-│  │ + 3D Car │ │  (Leaflet)│ │(Recharts)│ │Analytics │          │
-│  └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘          │
-│       └────────────┴────────────┴────────────┘                 │
-│                           │ WebSocket                          │
-└───────────────────────────┼─────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                           FRONTEND                                   │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐              │
+│  │  Dashboard   │  │   Safety     │  │   Driver     │              │
+│  │  + 3D Model  │  │   Monitor    │  │    HUD       │              │
+│  │  (React)     │  │  (WebSocket) │  │  (Separate)  │              │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘              │
+│         └─────────────────┴─────────────────┘                       │
+│                           │                                          │
+│              WebSocket + REST API (localhost:5173, 5174, 5175)      │
+└───────────────────────────┼──────────────────────────────────────────┘
                             │
-┌───────────────────────────┼─────────────────────────────────────┐
-│                    Backend (FastAPI)                            │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │                   REST API + WebSocket                    │  │
-│  │  /api/telemetry/reading    - Store telemetry             │  │
-│  │  /api/telemetry/stream     - WebSocket streaming         │  │
-│  │  /api/telemetry/trips      - Trip management             │  │
-│  │  /api/telemetry/export/csv - ML data export              │  │
-│  └────────────────────────────┬─────────────────────────────┘  │
-│                               │                                 │
-│  ┌────────────────────────────┴─────────────────────────────┐  │
-│  │                 PostgreSQL Database                       │  │
-│  │  vehicles │ telemetry_readings │ trips                   │  │
-│  └──────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-                            ▲
-                            │ HTTP POST
-┌───────────────────────────┼─────────────────────────────────────┐
-│                Vehicle Simulator (Python)                       │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │  Porsche 911 Physics Engine                              │  │
-│  │  - Keyboard Control (1/2/3 = City/Highway/Sport)         │  │
-│  │  - Realistic acceleration/deceleration                   │  │
-│  │  - Auto trip recording                                   │  │
-│  │  - 1 Hz telemetry updates                               │  │
-│  └──────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
+┌───────────────────────────┼──────────────────────────────────────────┐
+│                     BACKEND (FastAPI)                                │
+│  ┌─────────────────────────────────────────────────────────────────┐│
+│  │                     API Routes                                   ││
+│  │  /api/telemetry/*   - Readings, WebSocket, ML training          ││
+│  │  /api/vehicles/*    - Vehicle CRUD                              ││
+│  │  /api/trips/*       - Trip lifecycle                            ││
+│  │  /api/scoring/*     - Driver behavior (rules + ML hybrid)       ││
+│  │  /api/safety/*      - Drowsiness detection (WebSocket stream)   ││
+│  │  /api/analytics/*   - Stats, exports, summaries                 ││
+│  └─────────────────────────────────────────────────────────────────┘│
+│                            │                                         │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐              │
+│  │  ML Models   │  │  CV Models   │  │  Services    │              │
+│  │  - XGBoost   │  │  - MediaPipe │  │  - Scoring   │              │
+│  │  - Hybrid    │  │  - EAR algo  │  │  - Maint.    │              │
+│  │    Scorer    │  │  - MobileNet │  │    Predictor │              │
+│  └──────────────┘  └──────────────┘  └──────────────┘              │
+│                            │                                         │
+│  ┌─────────────────────────────────────────────────────────────────┐│
+│  │              PostgreSQL Database                                 ││
+│  │  vehicles | telemetry_readings | trips | safety_events          ││
+│  └─────────────────────────────────────────────────────────────────┘│
+└───────────────────────────┬──────────────────────────────────────────┘
+                            │
+┌───────────────────────────┼──────────────────────────────────────────┐
+│                  VEHICLE SIMULATOR                                   │
+│  ┌─────────────────────────────────────────────────────────────────┐│
+│  │  Porsche 911 Physics Engine                                     ││
+│  │  - Keyboard Control (1/2/3 = City/Highway/Sport)                ││
+│  │  - Realistic acceleration, deceleration, gear shifts            ││
+│  │  - Auto trip recording with mode tracking                       ││
+│  │  - GPS coordinate simulation (Stuttgart area)                   ││
+│  │  - 1 Hz telemetry POST to backend                              ││
+│  └─────────────────────────────────────────────────────────────────┘│
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -123,19 +165,19 @@ AutoPulse is a **connected car platform** that demonstrates real-time vehicle te
 
 ### Prerequisites
 - Docker & Docker Compose
-- Node.js 18+
-- Python 3.11+
+- Python 3.11+ with pip
+- Node.js 18+ with npm
 
-### 1. Clone & Setup
+### 1. Clone & Setup Database
 
 ```bash
 git clone https://github.com/yourusername/autopulse.git
 cd autopulse
 
-# Start database
+# Start PostgreSQL
 docker-compose up -d
 
-# Run migrations
+# Wait for DB to be ready
 ./scripts/check_db.sh
 ```
 
@@ -144,9 +186,9 @@ docker-compose up -d
 ```bash
 cd backend
 python -m venv venv
-source venv/bin/activate  # or `venv\Scripts\activate` on Windows
+source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn main:app --reload
+python main.py
 ```
 
 ### 3. Start Frontend
@@ -157,29 +199,22 @@ npm install
 npm run dev
 ```
 
-### 4. Start Driver HUD (Optional)
-
-```bash
-cd driver-hud
-npm install
-npm run dev
-```
-
-### 5. Run Simulator
+### 4. Start Simulator
 
 ```bash
 cd simulator
-python -m venv venv
-source venv/bin/activate
 pip install -r requirements.txt
 python vehicle_simulator.py
 ```
 
-### 6. Open Dashboards
+### 5. Open Applications
 
-- **Main Dashboard**: http://localhost:5173
-- **Driver HUD**: http://localhost:5174
-- **API Docs**: http://localhost:8000/docs
+| Application | URL | Description |
+|-------------|-----|-------------|
+| Main Dashboard | http://localhost:5173 | Full telemetry dashboard |
+| Driver HUD | http://localhost:5174 | Minimal driving display |
+| Safety Monitor | http://localhost:5173/safety | Drowsiness detection |
+| API Docs | http://localhost:8000/docs | Swagger UI |
 
 ---
 
@@ -190,115 +225,129 @@ python vehicle_simulator.py
 | `1` | City Mode (25-50 km/h) |
 | `2` | Highway Mode (110-140 km/h) |
 | `3` | Sport Mode (140-220 km/h) |
-| `P` | Park |
-| `R` | Reverse (only when stopped) |
-| `F` | Toggle low fuel (test warnings) |
+| `P` | Park (ends current trip) |
+| `R` | Reverse |
+| `F` | Toggle low fuel warning |
 | `Q` | Quit |
 
 ---
 
-## 📦 Modules
+## 📡 API Endpoints
 
-### Module 1: Telemetry Platform ✅
-Real-time data collection, visualization, and analytics.
-
-### Module 2: Predictive Maintenance 🚧
-ML-based maintenance prediction using telemetry patterns.
-
-### Module 3: Drowsiness Detection 🚧
-Computer vision for driver alertness monitoring.
-
-### Module 4: Driver Behavior Analytics 🚧
-Causal analysis of driving patterns for maintenance forecasting.
-
----
-
-## 🛠️ Tech Stack
-
-| Layer | Technology |
-|-------|------------|
-| Frontend | React 18, TypeScript, Tailwind CSS, Three.js, Recharts |
-| Backend | FastAPI, SQLAlchemy, WebSockets |
-| Database | PostgreSQL 15 |
-| 3D Model | GLTF/GLB, React Three Fiber |
-| Maps | Leaflet, OpenStreetMap |
-| Simulator | Python, asyncio, httpx |
-
----
-
-## 📊 API Endpoints
-
+### Telemetry
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/telemetry/vehicles` | List all vehicles |
-| POST | `/api/telemetry/reading` | Submit telemetry reading |
-| GET | `/api/telemetry/latest/{vehicle_id}` | Get latest reading |
-| WS | `/api/telemetry/stream/{vehicle_id}` | WebSocket stream |
-| POST | `/api/telemetry/trips/start` | Start new trip |
-| POST | `/api/telemetry/trips/{trip_id}/end` | End trip |
-| GET | `/api/telemetry/stats/weekly/{vehicle_id}` | Weekly stats |
-| GET | `/api/telemetry/export/csv/{vehicle_id}` | Export telemetry CSV |
-| GET | `/api/telemetry/export/trips-csv/{vehicle_id}` | Export trips CSV |
+| POST | `/api/telemetry/readings` | Ingest telemetry |
+| GET | `/api/telemetry/readings/{vehicle_id}` | Get history |
+| WS | `/api/telemetry/stream/{vehicle_id}` | Live stream |
+
+### Trips
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/trips/start` | Start trip |
+| POST | `/api/trips/{trip_id}/end` | End trip |
+| GET | `/api/trips/{trip_id}` | Get trip details |
+
+### Scoring
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/scoring/trips/{vehicle_id}` | Get scored trips |
+| POST | `/api/scoring/trips/{trip_id}/score` | Score a trip |
+| POST | `/api/scoring/trips/{trip_id}/hybrid` | ML hybrid scoring |
+
+### Safety
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| WS | `/api/safety/stream/{vehicle_id}` | Drowsiness WebSocket |
+| GET | `/api/safety/status/{vehicle_id}` | Current drowsiness state |
+| POST | `/api/safety/detect` | Single frame detection |
+
+### Analytics
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/analytics/summary/{vehicle_id}` | Vehicle summary |
+| GET | `/api/analytics/weekly/{vehicle_id}` | Weekly stats |
+| GET | `/api/analytics/export/csv/{vehicle_id}` | Export CSV |
 
 ---
 
-## 📁 Project Structure
+##  Project Structure
 
 ```
 autopulse/
 ├── backend/
 │   ├── app/
-│   │   ├── api/            # FastAPI routes
-│   │   ├── models/         # SQLAlchemy models
-│   │   └── schemas/        # Pydantic schemas
-│   ├── migrations/         # SQL migrations
-│   └── main.py            # App entry point
+│   │   ├── api/           # REST + WebSocket endpoints
+│   │   ├── cv/            # Computer vision (drowsiness)
+│   │   ├── ml/            # Machine learning models
+│   │   ├── models/        # SQLAlchemy ORM models
+│   │   ├── schemas/       # Pydantic validation
+│   │   └── services/      # Business logic
+│   ├── models/            # Trained model files (.pth, .pt)
+│   └── main.py
 ├── frontend/
 │   ├── src/
-│   │   ├── pages/         # React pages
-│   │   ├── components/    # Reusable components
-│   │   ├── hooks/         # Custom hooks
-│   │   └── types/         # TypeScript types
-│   └── public/models/     # 3D car model
-├── driver-hud/            # Standalone HUD app
-├── simulator/             # Vehicle simulator
-├── scripts/               # Utility scripts
+│   │   ├── pages/         # Dashboard, Trips, Safety, etc.
+│   │   ├── components/    # Reusable UI components
+│   │   └── hooks/         # useTelemetry, etc.
+│   └── public/models/     # 3D car model (GLTF)
+├── driver-hud/            # Standalone driver display
+├── simulator/             # Vehicle physics simulator
+├── docs/                  # Documentation
 └── docker-compose.yml
 ```
 
 ---
 
-## 🎨 Mode Themes
+## 📊 ML Model Performance
 
-| Mode | Color | Speed Range |
-|------|-------|-------------|
-| 🅿️ Parked | Gray | 0 km/h |
-| 🔄 Reverse | Purple | 0-15 km/h |
-| 🏙️ City | Cyan | 25-50 km/h |
-| 🛣️ Highway | Blue | 110-140 km/h |
-| 🔥 Sport | Orange | 140-220 km/h |
+| Model | Task | Accuracy | Notes |
+|-------|------|----------|-------|
+| Hybrid Scorer | Driver Behavior | 92.7% | XGBoost + Rules |
+| Eye Classifier | Drowsiness | ~96% | MediaPipe + EAR |
+| MobileNetV2 | Eye State | Trained | Backup classifier |
+
+---
+
+## 🎨 UI Themes
+
+| Mode | Color | Trigger |
+|------|-------|---------|
+| 🅿️ Parked | Gray | Speed = 0, trip ended |
+| 🔄 Reverse | Purple | Gear = R |
+| 🏙️ City | Cyan | 0-60 km/h |
+| 🛣️ Highway | Blue | 60-120 km/h |
+| 🔥 Sport | Orange | 120+ km/h |
+
+---
+
+## 🔮 Future Enhancements
+
+- [ ] Anomaly detection (Isolation Forest)
+- [ ] Failure prediction timeline
+- [ ] Head pose distraction detection
+- [ ] PDF report generation
+- [ ] Mobile companion app
+- [ ] Cloud deployment (Railway/Vercel)
 
 ---
 
 ## 👤 Author
 
-**Mohamed** - BSc Robotics and Intelligent Systems, Constructor University Bremen
-
-- GitHub: [@yourusername](https://github.com/yourusername)
-- LinkedIn: [Your LinkedIn](https://linkedin.com/in/yourprofile)
+**Mohamed Gamal** - BSc Robotics and Intelligent Systems
 
 ---
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License - see [LICENSE](LICENSE)
 
 ---
 
 <div align="center">
 
-**Built with ❤️ for the automotive industry**
+**Built with ❤️ for the German automotive industry**
 
-🏎️ *Ready to drive innovation at Porsche, BMW, or Mercedes?* 🏎️
+🏎️ *Demonstrating skills for Porsche, BMW, Mercedes, and beyond* 🏎️
 
 </div>

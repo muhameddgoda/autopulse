@@ -38,8 +38,11 @@ class AnomalyDetector:
     - Driver impairment detection
     """
     
-    def __init__(self, model_dir: str = "app/ml/trained_models"):
-        self.model_dir = Path(model_dir)
+    # Compute default model directory relative to this file
+    _DEFAULT_MODEL_DIR = Path(__file__).parent.parent / "trained_models"
+    
+    def __init__(self, model_dir: str=None):
+        self.model_dir = Path(model_dir) if model_dir else self._DEFAULT_MODEL_DIR
         self.model_dir.mkdir(parents=True, exist_ok=True)
         
         self.model = None
@@ -62,8 +65,8 @@ class AnomalyDetector:
     def train(
         self,
         examples: List[TrainingExample],
-        algorithm: str = "isolation_forest",
-        contamination: float = 0.1
+        algorithm: str="isolation_forest",
+        contamination: float=0.1
     ) -> Dict:
         """
         Train the anomaly detector
@@ -275,7 +278,7 @@ class AnomalyDetector:
         X, _ = collector.prepare_features_matrix([example])
         return self.predict(X[0])
     
-    def save(self, filename: str = "anomaly_detector"):
+    def save(self, filename: str="anomaly_detector"):
         """Save trained model to disk"""
         if not self.is_trained:
             print("❌ No trained model to save")
@@ -293,7 +296,7 @@ class AnomalyDetector:
         
         print(f"✅ Model saved to {self.model_dir}")
     
-    def load(self, filename: str = "anomaly_detector") -> bool:
+    def load(self, filename: str="anomaly_detector") -> bool:
         """Load trained model from disk"""
         model_path = self.model_dir / f"{filename}.joblib"
         scaler_path = self.model_dir / f"{filename}_scaler.joblib"

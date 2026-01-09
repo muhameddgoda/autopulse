@@ -61,17 +61,39 @@ except ImportError:
     MEDIAPIPE_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/safety", tags=["safety"])
+router = APIRouter(tags=["safety"])
 
+# Global state for current drowsiness status (per vehicle)
+_current_drowsiness_status: dict = {}
+
+# ============================================
+# STATUS ENDPOINT (for HUD polling)
+# ============================================
+
+
+@router.get("/status/{vehicle_id}")
+async def get_drowsiness_status(vehicle_id: UUID):
+    """
+    Get current drowsiness status for a vehicle.
+    Used by HUD to display warnings.
+    """
+    status = _current_drowsiness_status.get(str(vehicle_id), {})
+    return {
+        "alert_level": status.get("alert_level", "none"),
+        "is_drowsy": status.get("is_drowsy", False),
+        "confidence": status.get("confidence", 0),
+        "timestamp": status.get("timestamp", None)
+    }
 
 # ============================================
 # DETECTION ENDPOINTS
 # ============================================
 
+
 @router.post("/detect", response_model=DetectionResponse)
 async def detect_drowsiness(
     request: DetectionRequest,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession=Depends(get_db)
 ):
     """
     Detect drowsiness from a single image frame.
@@ -115,7 +137,7 @@ async def detect_drowsiness(
 async def drowsiness_stream(
     websocket: WebSocket,
     vehicle_id: UUID,
-    trip_id: Optional[UUID] = None
+    trip_id: Optional[UUID]=None
 ):
     """
     WebSocket endpoint for real-time drowsiness detection.
@@ -174,6 +196,14 @@ async def drowsiness_stream(
                             "session_stats": session_stats
                         }
                         
+                        # Update global status for HUD polling
+                        _current_drowsiness_status[str(vehicle_id)] = {
+                            "alert_level": state.alert_level.value,
+                            "is_drowsy": state.is_drowsy,
+                            "confidence": state.confidence,
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        }
+                        
                         # Send detection result
                         await websocket.send_json({
                             "type": "detection",
@@ -219,6 +249,8 @@ async def drowsiness_stream(
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
     finally:
+        # Clear status when disconnected
+        _current_drowsiness_status.pop(str(vehicle_id), None)
         # Log session summary
         try:
             summary = detector.get_session_summary()
@@ -246,15 +278,15 @@ async def get_safety_status():
         "message": "Ready for drowsiness detection" if CV_AVAILABLE else "Install dependencies: pip install mediapipe opencv-python torch torchvision"
     }
 
-
 # ============================================
 # SESSION MANAGEMENT
 # ============================================
 
+
 @router.post("/session/start", response_model=SafetySessionResponse)
 async def start_safety_session(
     request: SessionStartRequest,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession=Depends(get_db)
 ):
     """
     Start a new safety monitoring session.
@@ -297,7 +329,7 @@ async def start_safety_session(
 async def end_safety_session(
     session_id: UUID,
     request: SessionEndRequest,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession=Depends(get_db)
 ):
     """End a safety monitoring session and save statistics."""
     result = await db.execute(
@@ -344,19 +376,19 @@ async def end_safety_session(
         message="Safety monitoring session ended"
     )
 
-
 # ============================================
 # EVENTS & HISTORY
 # ============================================
 
+
 @router.get("/events/{vehicle_id}", response_model=List[SafetyEventResponse])
 async def get_safety_events(
     vehicle_id: UUID,
-    trip_id: Optional[UUID] = None,
-    severity: Optional[str] = None,
-    limit: int = Query(default=50, ge=1, le=200),
-    days: int = Query(default=7, ge=1, le=90),
-    db: AsyncSession = Depends(get_db)
+    trip_id: Optional[UUID]=None,
+    severity: Optional[str]=None,
+    limit: int=Query(default=50, ge=1, le=200),
+    days: int=Query(default=7, ge=1, le=90),
+    db: AsyncSession=Depends(get_db)
 ):
     """Get safety events for a vehicle."""
     since = datetime.now(timezone.utc) - timedelta(days=days)
@@ -395,8 +427,8 @@ async def get_safety_events(
 @router.get("/summary/{vehicle_id}", response_model=SafetySummaryResponse)
 async def get_safety_summary(
     vehicle_id: UUID,
-    days: int = Query(default=30, ge=1, le=365),
-    db: AsyncSession = Depends(get_db)
+    days: int=Query(default=30, ge=1, le=365),
+    db: AsyncSession=Depends(get_db)
 ):
     """Get safety summary statistics for a vehicle."""
     since = datetime.now(timezone.utc) - timedelta(days=days)

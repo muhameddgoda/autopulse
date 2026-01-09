@@ -3,22 +3,25 @@ import {
   Eye,
   EyeOff,
   AlertTriangle,
-  AlertCircle,
   Camera,
   CameraOff,
-  Activity,
   Shield,
-  ShieldAlert,
   Volume2,
   VolumeX,
   Play,
   Square,
+  Car,
 } from "lucide-react";
+import {
+  DARK_BG,
+  DARK_CARD,
+  DARK_BORDER,
+  DARK_TEXT,
+  DARK_TEXT_MUTED,
+  ORANGE,
+} from "../constants/theme";
 
-// Types
 interface DrowsinessState {
-  ear_left: number;
-  ear_right: number;
   ear_average: number;
   eyes_closed: boolean;
   closed_duration_ms: number;
@@ -26,700 +29,779 @@ interface DrowsinessState {
   blinks_per_minute: number;
   alert_level: "none" | "warning" | "alert" | "critical";
   is_drowsy: boolean;
-  head_pitch: number | null;
-  head_yaw: number | null;
-  head_roll: number | null;
   face_detected: boolean;
   confidence: number;
-  timestamp: number;
+  landmarks?: { left_eye: number[][]; right_eye: number[][] };
 }
 
 interface SafetyState {
   drowsiness: DrowsinessState;
-  distraction?: {
-    head_pose: { pitch: number; yaw: number; roll: number };
-    is_distracted: boolean;
-    distraction_type: string;
-    distraction_duration_ms: number;
-    looking_at_road: boolean;
-    attention_score: number;
-  };
-  is_safe: boolean;
   safety_score: number;
-  active_alerts: string[];
   session_stats: {
     duration_seconds: number;
     total_drowsy_seconds: number;
-    total_distracted_seconds: number;
     drowsiness_events: number;
-    distraction_events: number;
   };
 }
 
-interface SafetyAlert {
-  type: string;
-  severity: string;
-  timestamp: string;
-  duration_seconds: number;
-  details: Record<string, unknown>;
-}
-
 const SafetyMonitor: React.FC = () => {
-  // State
   const [isMonitoring, setIsMonitoring] = useState(false);
   const [cameraEnabled, setCameraEnabled] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [safetyState, setSafetyState] = useState<SafetyState | null>(null);
-  const [alerts, setAlerts] = useState<SafetyAlert[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<
     "disconnected" | "connecting" | "connected"
   >("disconnected");
   const [error, setError] = useState<string | null>(null);
   const [fps, setFps] = useState(0);
-  const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
-  // Refs
+  const [activeTrip, setActiveTrip] = useState<{
+    id: string;
+    is_active: boolean;
+  } | null>(null);
+  const [autoStarted, setAutoStarted] = useState(false);
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const overlayRef = useRef<HTMLCanvasElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const frameIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const frameIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const frameCountRef = useRef(0);
-  const lastFpsUpdateRef = useRef(Date.now());
+  const lastFpsRef = useRef(Date.now());
+  const lastAlertRef = useRef(0);
 
-  // Vehicle ID (you'd get this from your app context)
   const vehicleId = "68f2ce4a-28df-4f11-bf5b-c961d1f7d064";
 
-  // Play alert sound using Web Audio API
-  const playAlertSound = useCallback(() => {
-    if (soundEnabled) {
-      try {
-        const audioContext = new (window.AudioContext ||
-          (window as any).webkitAudioContext)();
-        const oscillator = audioContext.createOscillator();
-        const gainNode = audioContext.createGain();
-
-        oscillator.connect(gainNode);
-        gainNode.connect(audioContext.destination);
-
-        oscillator.frequency.value = 880;
-        oscillator.type = "sine";
-        gainNode.gain.value = 0.3;
-
-        oscillator.start();
-        oscillator.stop(audioContext.currentTime + 0.2);
-      } catch (e) {
-        console.log("Audio not available");
+  const fetchActiveTrip = useCallback(async () => {
+    try {
+      const res = await fetch(
+        `http://localhost:8000/api/telemetry/trips/active/${vehicleId}`
+      );
+      if (res.ok) {
+        const trip = await res.json();
+        if (trip?.is_active) {
+          setActiveTrip(trip);
+          return trip;
+        }
       }
+      setActiveTrip(null);
+      return null;
+    } catch {
+      return null;
     }
+  }, []);
+
+  const playAlert = useCallback(() => {
+    if (!soundEnabled) return;
+    try {
+      const ctx = new AudioContext();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.5, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.3);
+    } catch {}
   }, [soundEnabled]);
 
-  // Start camera
-  const startCamera = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 640 },
-          height: { ideal: 480 },
-          facingMode: "user",
-        },
-      });
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
-
-      streamRef.current = stream;
-      setCameraEnabled(true);
-      setError(null);
-    } catch (err) {
-      setError("Failed to access camera. Please allow camera permissions.");
-      console.error("Camera error:", err);
-    }
-  }, []);
-
-  // Stop camera
-  const stopCamera = useCallback(() => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-    setCameraEnabled(false);
-  }, []);
-
-  // Capture frame as base64
-  const captureFrame = useCallback((): string | null => {
-    if (!videoRef.current || !canvasRef.current) return null;
-
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-
-    if (!ctx || video.videoWidth === 0) return null;
-
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    ctx.drawImage(video, 0, 0);
-
-    return canvas.toDataURL("image/jpeg", 0.8);
-  }, []);
-
-  // Connect WebSocket
-  const connectWebSocket = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return;
-
-    setConnectionStatus("connecting");
-    const ws = new WebSocket(
-      `ws://localhost:8000/api/safety/stream/${vehicleId}`
-    );
-
-    ws.onopen = () => {
-      setConnectionStatus("connected");
-      setError(null);
-    };
-
-    ws.onmessage = (event) => {
-      const message = JSON.parse(event.data);
-      console.log("WS message:", message); // ADD THIS
-      if (message.type === "detection") {
-        setSafetyState(message.data);
-
-        // Draw landmarks on overlay
-        drawLandmarks(message.data?.drowsiness?.landmarks);
-
-        // Play alert sound while drowsy (throttled to every 500ms)
-        const alertLevel = message.data?.drowsiness?.alert_level;
-        const now = Date.now();
-        if (
-          (alertLevel === "alert" || alertLevel === "critical") &&
-          now - lastAlertSoundRef.current > 500
-        ) {
-          playAlertSound();
-          lastAlertSoundRef.current = now;
-        }
-
-        frameCountRef.current++;
-        if (now - lastFpsUpdateRef.current >= 1000) {
-          setFps(frameCountRef.current);
-          frameCountRef.current = 0;
-          lastFpsUpdateRef.current = now;
-        }
-
-        const state = message.data as SafetyState;
-        if (
-          state.drowsiness.alert_level === "alert" ||
-          state.drowsiness.alert_level === "critical"
-        ) {
-          playAlertSound();
-        }
-      } else if (message.type === "alert") {
-        setAlerts((prev) => [message.data, ...prev.slice(0, 49)]);
-        playAlertSound();
-      }
-    };
-
-    ws.onerror = () =>
-      setError("Connection error. Make sure the backend is running.");
-    ws.onclose = () => setConnectionStatus("disconnected");
-
-    wsRef.current = ws;
-  }, [vehicleId, playAlertSound]);
-
-  // Draw landmarks on overlay canvas
   const drawLandmarks = useCallback(
-    (
-      landmarks: { left_eye: number[][]; right_eye: number[][] } | undefined
-    ) => {
-      const video = videoRef.current;
-      const overlay = overlayCanvasRef.current;
-      if (!overlay || !video) return;
-
-      const ctx = overlay.getContext("2d");
+    (landmarks?: { left_eye: number[][]; right_eye: number[][] }) => {
+      const canvas = overlayRef.current,
+        video = videoRef.current;
+      if (!canvas || !video) return;
+      const ctx = canvas.getContext("2d");
       if (!ctx) return;
-
-      // Match canvas size to video display size
-      const rect = video.getBoundingClientRect();
-      overlay.width = rect.width;
-      overlay.height = rect.height;
-
-      // Clear previous drawings
-      ctx.clearRect(0, 0, overlay.width, overlay.height);
-
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 480;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
       if (!landmarks) return;
-
-      // Scale factors (video resolution to display size)
-      const scaleX = rect.width / video.videoWidth;
-      const scaleY = rect.height / video.videoHeight;
-
-      // Draw function for eye points
-      const drawEye = (points: number[][], color: string) => {
-        if (!points || points.length === 0) return;
-
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 2;
-        ctx.fillStyle = color;
-
-        // Draw points
-        points.forEach(([x, y]) => {
-          ctx.beginPath();
-          ctx.arc(x * scaleX, y * scaleY, 3, 0, 2 * Math.PI);
-          ctx.fill();
-        });
-
-        // Draw connecting lines
+      const sx = canvas.width / 640,
+        sy = canvas.height / 480;
+      ctx.fillStyle = ORANGE;
+      landmarks.left_eye?.forEach((p) => {
         ctx.beginPath();
-        ctx.moveTo(points[0][0] * scaleX, points[0][1] * scaleY);
-        for (let i = 1; i < points.length; i++) {
-          ctx.lineTo(points[i][0] * scaleX, points[i][1] * scaleY);
-        }
-        ctx.closePath();
-        ctx.stroke();
-      };
-
-      // Draw left eye (green) and right eye (blue)
-      drawEye(landmarks.left_eye, "#00ff00");
-      drawEye(landmarks.right_eye, "#00aaff");
+        ctx.arc(p[0] * sx, p[1] * sy, 3, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      ctx.fillStyle = "#fff";
+      landmarks.right_eye?.forEach((p) => {
+        ctx.beginPath();
+        ctx.arc(p[0] * sx, p[1] * sy, 3, 0, Math.PI * 2);
+        ctx.fill();
+      });
     },
     []
   );
 
-  // Disconnect WebSocket
-  const disconnectWebSocket = useCallback(() => {
-    if (wsRef.current) {
-      wsRef.current.send(JSON.stringify({ type: "end" }));
-      wsRef.current.close();
-      wsRef.current = null;
+  const startCamera = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 640, height: 480, facingMode: "user" },
+      });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        streamRef.current = stream;
+        setCameraEnabled(true);
+        setError(null);
+      }
+    } catch {
+      setError("Camera access denied");
     }
-    setConnectionStatus("disconnected");
   }, []);
 
-  // Send frame to server
-  const sendFrame = useCallback(() => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    const frame = captureFrame();
-    if (frame) {
-      wsRef.current.send(JSON.stringify({ type: "frame", data: frame }));
+  const stopCamera = useCallback(() => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setCameraEnabled(false);
+  }, []);
+
+  const captureFrame = useCallback((): string | null => {
+    const video = videoRef.current,
+      canvas = canvasRef.current;
+    if (!video || !canvas || video.readyState !== 4) return null;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0);
+    return canvas.toDataURL("image/jpeg", 0.8);
+  }, []);
+
+  const startMonitoring = useCallback(() => {
+    if (!cameraEnabled) {
+      setError("Enable camera first");
+      return;
     }
-  }, [captureFrame]);
+    setConnectionStatus("connecting");
+    const ws = new WebSocket(
+      `ws://localhost:8000/api/safety/stream/${vehicleId}`
+    );
+    wsRef.current = ws;
+    ws.onopen = () => {
+      setConnectionStatus("connected");
+      setError(null);
+      setIsMonitoring(true);
+      frameIntervalRef.current = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          const frame = captureFrame();
+          if (frame) ws.send(JSON.stringify({ type: "frame", data: frame }));
+        }
+      }, 100);
+    };
+    ws.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.type === "detection") {
+          setSafetyState(msg.data);
+          drawLandmarks(msg.data?.drowsiness?.landmarks);
+          const level = msg.data?.drowsiness?.alert_level;
+          const now = Date.now();
+          if (
+            (level === "alert" || level === "critical") &&
+            now - lastAlertRef.current > 500
+          ) {
+            playAlert();
+            lastAlertRef.current = now;
+          }
+          frameCountRef.current++;
+          if (now - lastFpsRef.current >= 1000) {
+            setFps(frameCountRef.current);
+            frameCountRef.current = 0;
+            lastFpsRef.current = now;
+          }
+        }
+      } catch {}
+    };
+    ws.onerror = () => setError("Connection error");
+    ws.onclose = () => {
+      setConnectionStatus("disconnected");
+      setIsMonitoring(false);
+    };
+  }, [cameraEnabled, captureFrame, drawLandmarks, playAlert]);
 
-  // Start monitoring
-  const startMonitoring = useCallback(async () => {
-    if (!cameraEnabled) await startCamera();
-    connectWebSocket();
-    frameIntervalRef.current = setInterval(sendFrame, 66); // ~15 FPS
-    setIsMonitoring(true);
-  }, [cameraEnabled, startCamera, connectWebSocket, sendFrame]);
-
-  // Stop monitoring
   const stopMonitoring = useCallback(() => {
     if (frameIntervalRef.current) {
       clearInterval(frameIntervalRef.current);
       frameIntervalRef.current = null;
     }
-    disconnectWebSocket();
+    if (wsRef.current) {
+      wsRef.current.send(JSON.stringify({ type: "end" }));
+      wsRef.current.close();
+      wsRef.current = null;
+    }
     setIsMonitoring(false);
-  }, [disconnectWebSocket]);
+    setConnectionStatus("disconnected");
+  }, []);
 
-  // Cleanup
   useEffect(() => {
-    return () => {
+    const check = async () => {
+      const trip = await fetchActiveTrip();
+      if (trip?.is_active && cameraEnabled && !isMonitoring && !autoStarted) {
+        startMonitoring();
+        setAutoStarted(true);
+      }
+      if (!trip && isMonitoring && autoStarted) {
+        stopMonitoring();
+        setAutoStarted(false);
+      }
+    };
+    check();
+    const i = setInterval(check, 3000);
+    return () => clearInterval(i);
+  }, [
+    fetchActiveTrip,
+    cameraEnabled,
+    isMonitoring,
+    autoStarted,
+    startMonitoring,
+    stopMonitoring,
+  ]);
+
+  useEffect(
+    () => () => {
       stopMonitoring();
       stopCamera();
-    };
-  }, [stopMonitoring, stopCamera]);
+    },
+    [stopMonitoring, stopCamera]
+  );
 
-  // Helpers
-  const getAlertColor = (level: string) => {
-    switch (level) {
-      case "critical":
-        return "bg-red-500";
-      case "alert":
-        return "bg-orange-500";
-      case "warning":
-        return "bg-yellow-500";
-      default:
-        return "bg-green-500";
-    }
-  };
-
-  const getScoreColor = (score: number) => {
-    if (score >= 80) return "text-green-500";
-    if (score >= 60) return "text-yellow-500";
-    if (score >= 40) return "text-orange-500";
-    return "text-red-500";
-  };
-
-  const formatDuration = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, "0")}`;
-  };
+  const alertColor = (l: string) =>
+    l === "critical"
+      ? "#ef4444"
+      : l === "alert"
+      ? ORANGE
+      : l === "warning"
+      ? "#eab308"
+      : "#22c55e";
+  const scoreColor = (s: number) =>
+    s >= 80 ? "#22c55e" : s >= 60 ? "#eab308" : s >= 40 ? ORANGE : "#ef4444";
+  const d = safetyState?.drowsiness;
+  const stats = safetyState?.session_stats;
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-6">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-3xl font-bold flex items-center gap-3">
-              <Shield className="w-8 h-8 text-blue-500" />
-              Driver Safety Monitor
-            </h1>
-            <p className="text-gray-400 mt-1">
-              Real-time drowsiness & distraction detection
-            </p>
-          </div>
-
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => setSoundEnabled(!soundEnabled)}
-              className={`p-2 rounded-lg ${
-                soundEnabled ? "bg-blue-600" : "bg-gray-700"
-              }`}
-            >
-              {soundEnabled ? (
-                <Volume2 className="w-5 h-5" />
-              ) : (
-                <VolumeX className="w-5 h-5" />
-              )}
-            </button>
-
+    <div style={{ backgroundColor: DARK_BG, minHeight: "100vh", padding: 16 }}>
+      {/* Header */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 12,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Shield size={24} style={{ color: ORANGE }} />
+          <span style={{ color: DARK_TEXT, fontSize: 20, fontWeight: "bold" }}>
+            Safety Monitor
+          </span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {activeTrip && (
             <div
-              className={`px-3 py-1 rounded-full text-sm flex items-center gap-2 ${
-                connectionStatus === "connected"
-                  ? "bg-green-600"
-                  : connectionStatus === "connecting"
-                  ? "bg-yellow-600"
-                  : "bg-gray-700"
-              }`}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "4px 10px",
+                borderRadius: 20,
+                backgroundColor: DARK_CARD,
+                border: `1px solid ${DARK_BORDER}`,
+              }}
             >
-              <div
-                className={`w-2 h-2 rounded-full ${
-                  connectionStatus === "connected"
-                    ? "bg-green-300 animate-pulse"
-                    : connectionStatus === "connecting"
-                    ? "bg-yellow-300 animate-pulse"
-                    : "bg-gray-500"
-                }`}
-              />
-              {connectionStatus}
-            </div>
-
-            {isMonitoring && (
-              <div className="px-3 py-1 bg-gray-800 rounded-full text-sm">
-                {fps} FPS
-              </div>
-            )}
-          </div>
-        </div>
-
-        {error && (
-          <div className="bg-red-900/50 border border-red-500 rounded-lg p-4 mb-6 flex items-center gap-3">
-            <AlertCircle className="w-5 h-5 text-red-500" />
-            <span>{error}</span>
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Camera Feed */}
-          <div className="lg:col-span-2">
-            <div className="bg-gray-800 rounded-xl p-4">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold flex items-center gap-2">
-                  <Camera className="w-5 h-5" />
-                  Camera Feed
-                </h2>
-                <div className="flex gap-2">
-                  {!cameraEnabled ? (
-                    <button
-                      onClick={startCamera}
-                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg flex items-center gap-2"
-                    >
-                      <Camera className="w-4 h-4" /> Enable Camera
-                    </button>
-                  ) : !isMonitoring ? (
-                    <button
-                      onClick={startMonitoring}
-                      className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg flex items-center gap-2"
-                    >
-                      <Play className="w-4 h-4" /> Start Monitoring
-                    </button>
-                  ) : (
-                    <button
-                      onClick={stopMonitoring}
-                      className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg flex items-center gap-2"
-                    >
-                      <Square className="w-4 h-4" /> Stop
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              <div className="relative bg-black rounded-lg overflow-hidden aspect-video">
-                <video
-                  ref={videoRef}
-                  className="w-full h-full object-cover"
-                  autoPlay
-                  playsInline
-                  muted
-                />
-                <canvas ref={canvasRef} className="hidden" />
-                <canvas
-                  ref={overlayCanvasRef}
-                  className="absolute inset-0 w-full h-full pointer-events-none"
-                />
-
-                {safetyState && (
-                  <>
-                    {safetyState.drowsiness.alert_level !== "none" && (
-                      <div
-                        className={`absolute inset-0 pointer-events-none ${
-                          safetyState.drowsiness.alert_level === "critical"
-                            ? "bg-red-500/30 animate-pulse"
-                            : safetyState.drowsiness.alert_level === "alert"
-                            ? "bg-orange-500/20"
-                            : "bg-yellow-500/10"
-                        }`}
-                      />
-                    )}
-
-                    {!safetyState.drowsiness.face_detected && (
-                      <div className="absolute top-4 right-4 bg-black/70 px-3 py-2 rounded-lg flex items-center gap-2">
-                        <CameraOff className="w-4 h-4 text-yellow-400" />
-                        <span className="text-yellow-400 text-sm">
-                          Face not detected
-                        </span>
-                      </div>
-                    )}
-
-                    <div className="absolute top-4 left-4">
-                      <div
-                        className={`px-3 py-1 rounded-full text-sm flex items-center gap-2 ${
-                          safetyState.drowsiness.eyes_closed
-                            ? "bg-red-600"
-                            : "bg-green-600"
-                        }`}
-                      >
-                        {safetyState.drowsiness.eyes_closed ? (
-                          <EyeOff className="w-4 h-4" />
-                        ) : (
-                          <Eye className="w-4 h-4" />
-                        )}
-                        {safetyState.drowsiness.eyes_closed ? "Closed" : "Open"}
-                      </div>
-                    </div>
-
-                    {safetyState.drowsiness.is_drowsy && (
-                      <div className="absolute bottom-0 left-0 right-0 bg-red-600 py-3 px-4 flex items-center justify-center gap-3 animate-pulse">
-                        <AlertTriangle className="w-6 h-6" />
-                        <span className="font-bold text-lg">
-                          DROWSINESS DETECTED!
-                        </span>
-                        <AlertTriangle className="w-6 h-6" />
-                      </div>
-                    )}
-                  </>
-                )}
-
-                {!cameraEnabled && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
-                    <div className="text-center">
-                      <CameraOff className="w-16 h-16 mx-auto text-gray-600 mb-4" />
-                      <p className="text-gray-400 mb-4">Camera is disabled</p>
-                      <button
-                        onClick={startCamera}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg"
-                      >
-                        Enable Camera
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Stats Panel */}
-          <div className="space-y-4">
-            <div className="bg-gray-800 rounded-xl p-6">
-              <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                {safetyState?.is_safe ? (
-                  <Shield className="w-5 h-5 text-green-500" />
-                ) : (
-                  <ShieldAlert className="w-5 h-5 text-red-500" />
-                )}
-                Safety Score
-              </h3>
-              <div className="text-center">
-                <div
-                  className={`text-6xl font-bold ${getScoreColor(
-                    safetyState?.safety_score ?? 100
-                  )}`}
-                >
-                  {safetyState?.safety_score?.toFixed(0) ?? "--"}
-                </div>
-                <div className="text-gray-400 mt-2">/ 100</div>
-              </div>
-              {safetyState && safetyState.drowsiness.alert_level !== "none" && (
-                <div
-                  className={`mt-4 p-3 rounded-lg text-center ${
-                    safetyState.drowsiness.alert_level === "critical"
-                      ? "bg-red-600"
-                      : safetyState.drowsiness.alert_level === "alert"
-                      ? "bg-orange-600"
-                      : "bg-yellow-600"
-                  }`}
-                >
-                  <span className="font-semibold uppercase">
-                    {safetyState.drowsiness.alert_level} Level
-                  </span>
-                </div>
-              )}
-            </div>
-
-            <div className="bg-gray-800 rounded-xl p-6">
-              <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                <Eye className="w-5 h-5" /> Eye Metrics
-              </h3>
-              <div className="space-y-4">
-                <div>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="text-gray-400">Eye Aspect Ratio</span>
-                    <span>
-                      {safetyState?.drowsiness.ear_average.toFixed(3) ?? "--"}
-                    </span>
-                  </div>
-                  <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full transition-all ${
-                        (safetyState?.drowsiness.ear_average ?? 0.3) < 0.22
-                          ? "bg-red-500"
-                          : "bg-green-500"
-                      }`}
-                      style={{
-                        width: `${Math.min(
-                          100,
-                          ((safetyState?.drowsiness.ear_average ?? 0.3) / 0.4) *
-                            100
-                        )}%`,
-                      }}
-                    />
-                  </div>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-400">Blinks/min</span>
-                  <span
-                    className={`text-xl font-semibold ${
-                      (safetyState?.drowsiness.blinks_per_minute ?? 0) > 25
-                        ? "text-yellow-500"
-                        : "text-white"
-                    }`}
-                  >
-                    {safetyState?.drowsiness.blinks_per_minute.toFixed(1) ??
-                      "--"}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-400">Eyes Closed</span>
-                  <span
-                    className={`text-xl font-semibold ${
-                      (safetyState?.drowsiness.closed_duration_ms ?? 0) > 500
-                        ? "text-red-500"
-                        : "text-white"
-                    }`}
-                  >
-                    {(
-                      (safetyState?.drowsiness.closed_duration_ms ?? 0) / 1000
-                    ).toFixed(1)}
-                    s
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-gray-800 rounded-xl p-6">
-              <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                <Activity className="w-5 h-5" /> Session Stats
-              </h3>
-              <div className="space-y-3">
-                <div className="flex justify-between">
-                  <span className="text-gray-400">Duration</span>
-                  <span>
-                    {formatDuration(
-                      safetyState?.session_stats.duration_seconds ?? 0
-                    )}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-400">Drowsy Time</span>
-                  <span className="text-orange-400">
-                    {(
-                      safetyState?.session_stats.total_drowsy_seconds ?? 0
-                    ).toFixed(1)}
-                    s
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-400">Drowsiness Events</span>
-                  <span>
-                    {safetyState?.session_stats.drowsiness_events ?? 0}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Alerts */}
-        <div className="mt-6 bg-gray-800 rounded-xl p-6">
-          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-            <AlertTriangle className="w-5 h-5" /> Recent Alerts
-            {alerts.length > 0 && (
-              <span className="ml-2 px-2 py-0.5 bg-red-600 rounded-full text-xs">
-                {alerts.length}
+              <Car size={12} style={{ color: ORANGE }} />
+              <span style={{ color: DARK_TEXT_MUTED, fontSize: 11 }}>
+                Trip Active
               </span>
-            )}
-          </h3>
-          {alerts.length === 0 ? (
-            <p className="text-gray-400 text-center py-8">
-              No alerts yet. Stay safe!
-            </p>
-          ) : (
-            <div className="space-y-2 max-h-64 overflow-y-auto">
-              {alerts.map((alert, i) => (
-                <div
-                  key={i}
-                  className={`p-3 rounded-lg flex items-center gap-3 ${
-                    alert.severity === "critical"
-                      ? "bg-red-900/50 border border-red-500"
-                      : alert.severity === "warning"
-                      ? "bg-orange-900/50 border border-orange-500"
-                      : "bg-gray-700"
-                  }`}
-                >
-                  <div
-                    className={`w-2 h-2 rounded-full ${getAlertColor(
-                      alert.severity
-                    )}`}
-                  />
-                  <div className="flex-1">
-                    <div className="font-medium">
-                      {alert.type?.replace(/_/g, " ") ?? "Unknown Alert"}
-                    </div>
-                    <div className="text-sm text-gray-400">
-                      Duration: {alert.duration_seconds.toFixed(1)}s
-                    </div>
-                  </div>
-                  <div className="text-sm text-gray-400">
-                    {new Date(alert.timestamp).toLocaleTimeString()}
-                  </div>
-                </div>
-              ))}
+              <div
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: "50%",
+                  backgroundColor: "#22c55e",
+                  animation: "pulse 2s infinite",
+                }}
+              />
             </div>
           )}
+          <span style={{ color: DARK_TEXT_MUTED, fontSize: 11 }}>
+            {fps} FPS
+          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <div
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                backgroundColor:
+                  connectionStatus === "connected"
+                    ? "#22c55e"
+                    : connectionStatus === "connecting"
+                    ? "#eab308"
+                    : "#6b7280",
+              }}
+            />
+            <span
+              style={{
+                color: DARK_TEXT_MUTED,
+                fontSize: 11,
+                textTransform: "capitalize",
+              }}
+            >
+              {connectionStatus}
+            </span>
+          </div>
+          <button
+            onClick={() => setSoundEnabled(!soundEnabled)}
+            style={{
+              padding: 6,
+              borderRadius: 6,
+              backgroundColor: soundEnabled ? ORANGE : DARK_CARD,
+              color: soundEnabled ? "#000" : DARK_TEXT,
+              border: "none",
+              cursor: "pointer",
+            }}
+          >
+            {soundEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />}
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div
+          style={{
+            marginBottom: 12,
+            padding: 10,
+            borderRadius: 8,
+            backgroundColor: "rgba(239,68,68,0.1)",
+            border: "1px solid rgba(239,68,68,0.3)",
+            color: DARK_TEXT,
+            fontSize: 13,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+          }}
+        >
+          <AlertTriangle size={14} style={{ color: "#ef4444" }} />
+          {error}
+        </div>
+      )}
+
+      {/* Main Layout - Side by Side */}
+      <div style={{ display: "flex", gap: 12, height: "calc(100vh - 100px)" }}>
+        {/* Left: Video Feed - Takes 70% */}
+        <div
+          style={{
+            flex: "0 0 70%",
+            backgroundColor: DARK_CARD,
+            border: `1px solid ${DARK_BORDER}`,
+            borderRadius: 12,
+            padding: 12,
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: 8,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                color: DARK_TEXT,
+                fontSize: 14,
+                fontWeight: 500,
+              }}
+            >
+              <Camera size={16} style={{ color: ORANGE }} />
+              Camera
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={cameraEnabled ? stopCamera : startCamera}
+                style={{
+                  padding: "4px 12px",
+                  borderRadius: 6,
+                  fontSize: 12,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                  border: "none",
+                  cursor: "pointer",
+                  backgroundColor: cameraEnabled
+                    ? "rgba(239,68,68,0.2)"
+                    : ORANGE,
+                  color: cameraEnabled ? "#ef4444" : "#000",
+                }}
+              >
+                {cameraEnabled ? (
+                  <>
+                    <CameraOff size={14} />
+                    Stop
+                  </>
+                ) : (
+                  <>
+                    <Camera size={14} />
+                    Start
+                  </>
+                )}
+              </button>
+              <button
+                onClick={isMonitoring ? stopMonitoring : startMonitoring}
+                disabled={!cameraEnabled}
+                style={{
+                  padding: "4px 12px",
+                  borderRadius: 6,
+                  fontSize: 12,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                  border: "none",
+                  cursor: cameraEnabled ? "pointer" : "not-allowed",
+                  opacity: cameraEnabled ? 1 : 0.5,
+                  backgroundColor: isMonitoring
+                    ? "rgba(239,68,68,0.2)"
+                    : "rgba(34,197,94,0.2)",
+                  color: isMonitoring ? "#ef4444" : "#22c55e",
+                }}
+              >
+                {isMonitoring ? (
+                  <>
+                    <Square size={14} />
+                    Stop
+                  </>
+                ) : (
+                  <>
+                    <Play size={14} />
+                    Monitor
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+          <div
+            style={{
+              flex: 1,
+              position: "relative",
+              backgroundColor: "#000",
+              borderRadius: 8,
+              overflow: "hidden",
+            }}
+          >
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              style={{ width: "100%", height: "100%", objectFit: "cover" }}
+            />
+            <canvas
+              ref={overlayRef}
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                width: "100%",
+                height: "100%",
+                pointerEvents: "none",
+              }}
+            />
+            <canvas ref={canvasRef} style={{ display: "none" }} />
+            {d?.alert_level && d.alert_level !== "none" && (
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  border: `4px solid ${alertColor(d.alert_level)}`,
+                  pointerEvents: "none",
+                  animation:
+                    d.alert_level === "critical" ? "pulse 1s infinite" : "none",
+                }}
+              >
+                <div
+                  style={{
+                    position: "absolute",
+                    top: 12,
+                    left: "50%",
+                    transform: "translateX(-50%)",
+                    padding: "6px 16px",
+                    borderRadius: 8,
+                    backgroundColor: alertColor(d.alert_level),
+                    color: "#000",
+                    fontWeight: "bold",
+                    fontSize: 14,
+                  }}
+                >
+                  ⚠️ DROWSINESS {d.alert_level.toUpperCase()}
+                </div>
+              </div>
+            )}
+            {!cameraEnabled && (
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: DARK_CARD,
+                }}
+              >
+                <div style={{ textAlign: "center" }}>
+                  <CameraOff
+                    size={48}
+                    style={{
+                      color: DARK_TEXT_MUTED,
+                      opacity: 0.5,
+                      marginBottom: 8,
+                    }}
+                  />
+                  <p style={{ color: DARK_TEXT_MUTED, fontSize: 14 }}>
+                    Click "Start" to enable camera
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Right: Stats Panel - Takes 30% */}
+        <div
+          style={{
+            flex: "0 0 calc(30% - 12px)",
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+          }}
+        >
+          {/* Safety Score */}
+          <div
+            style={{
+              backgroundColor: DARK_CARD,
+              border: `1px solid ${DARK_BORDER}`,
+              borderRadius: 12,
+              padding: 12,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 10,
+                textTransform: "uppercase",
+                letterSpacing: 1,
+                color: DARK_TEXT_MUTED,
+                marginBottom: 4,
+              }}
+            >
+              Safety Score
+            </div>
+            <div
+              style={{
+                fontSize: 40,
+                fontWeight: "bold",
+                color: scoreColor(safetyState?.safety_score ?? 100),
+              }}
+            >
+              {Math.round(safetyState?.safety_score ?? 100)}
+            </div>
+          </div>
+
+          {/* Eye Metrics */}
+          <div
+            style={{
+              backgroundColor: DARK_CARD,
+              border: `1px solid ${DARK_BORDER}`,
+              borderRadius: 12,
+              padding: 12,
+              flex: 1,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 10,
+                textTransform: "uppercase",
+                letterSpacing: 1,
+                color: DARK_TEXT_MUTED,
+                marginBottom: 8,
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+              }}
+            >
+              <Eye size={12} style={{ color: ORANGE }} />
+              Eye Metrics
+            </div>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 6,
+                fontSize: 12,
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: DARK_TEXT_MUTED }}>State</span>
+                <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  {d?.eyes_closed ? (
+                    <>
+                      <EyeOff size={14} style={{ color: "#ef4444" }} />
+                      <span style={{ color: "#ef4444" }}>Closed</span>
+                    </>
+                  ) : (
+                    <>
+                      <Eye size={14} style={{ color: "#22c55e" }} />
+                      <span style={{ color: "#22c55e" }}>Open</span>
+                    </>
+                  )}
+                </span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: DARK_TEXT_MUTED }}>EAR</span>
+                <span
+                  style={{
+                    color:
+                      (d?.ear_average ?? 0.3) < 0.22 ? "#ef4444" : "#22c55e",
+                  }}
+                >
+                  {(d?.ear_average ?? 0).toFixed(3)}
+                </span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: DARK_TEXT_MUTED }}>Confidence</span>
+                <span style={{ color: DARK_TEXT }}>
+                  {((d?.confidence ?? 0) * 100).toFixed(0)}%
+                </span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: DARK_TEXT_MUTED }}>Blinks</span>
+                <span style={{ color: DARK_TEXT }}>{d?.blink_count ?? 0}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: DARK_TEXT_MUTED }}>Blinks/min</span>
+                <span style={{ color: DARK_TEXT }}>
+                  {(d?.blinks_per_minute ?? 0).toFixed(1)}
+                </span>
+              </div>
+              {(d?.closed_duration_ms ?? 0) > 0 && (
+                <div
+                  style={{ display: "flex", justifyContent: "space-between" }}
+                >
+                  <span style={{ color: DARK_TEXT_MUTED }}>Closed</span>
+                  <span style={{ color: "#ef4444" }}>
+                    {((d?.closed_duration_ms ?? 0) / 1000).toFixed(1)}s
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Alert Status */}
+          <div
+            style={{
+              backgroundColor: DARK_CARD,
+              border: `1px solid ${DARK_BORDER}`,
+              borderRadius: 12,
+              padding: 12,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 10,
+                textTransform: "uppercase",
+                letterSpacing: 1,
+                color: DARK_TEXT_MUTED,
+                marginBottom: 8,
+              }}
+            >
+              Alert Status
+            </div>
+            <div
+              style={{
+                padding: 8,
+                borderRadius: 6,
+                textAlign: "center",
+                fontWeight: "bold",
+                fontSize: 14,
+                backgroundColor: alertColor(d?.alert_level ?? "none"),
+                color: "#000",
+              }}
+            >
+              {(d?.alert_level ?? "none").toUpperCase()}
+            </div>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                fontSize: 12,
+                marginTop: 8,
+              }}
+            >
+              <span style={{ color: DARK_TEXT_MUTED }}>Face</span>
+              <span style={{ color: d?.face_detected ? "#22c55e" : "#ef4444" }}>
+                {d?.face_detected ? "Yes" : "No"}
+              </span>
+            </div>
+          </div>
+
+          {/* Session Stats */}
+          <div
+            style={{
+              backgroundColor: DARK_CARD,
+              border: `1px solid ${DARK_BORDER}`,
+              borderRadius: 12,
+              padding: 12,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 10,
+                textTransform: "uppercase",
+                letterSpacing: 1,
+                color: DARK_TEXT_MUTED,
+                marginBottom: 8,
+              }}
+            >
+              Session
+            </div>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 4,
+                fontSize: 12,
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: DARK_TEXT_MUTED }}>Duration</span>
+                <span style={{ color: DARK_TEXT }}>
+                  {Math.floor((stats?.duration_seconds ?? 0) / 60)}:
+                  {String(
+                    Math.floor((stats?.duration_seconds ?? 0) % 60)
+                  ).padStart(2, "0")}
+                </span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: DARK_TEXT_MUTED }}>Drowsy</span>
+                <span style={{ color: ORANGE }}>
+                  {(stats?.total_drowsy_seconds ?? 0).toFixed(1)}s
+                </span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: DARK_TEXT_MUTED }}>Events</span>
+                <span style={{ color: "#ef4444" }}>
+                  {stats?.drowsiness_events ?? 0}
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>

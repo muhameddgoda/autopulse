@@ -1,45 +1,119 @@
 # AutoPulse .gitignore
 
+# =========================
 # Python
+# =========================
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
 venv/
+env/
+.venv/
 .env
 *.egg-info/
 dist/
 build/
+*.egg
 
-# Node
+# =========================
+# Node.js
+# =========================
 node_modules/
 .npm
 npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
 
-# IDE
+# =========================
+# IDE & Editors
+# =========================
 .idea/
 .vscode/
 *.swp
 *.swo
+*.sublime-workspace
+*.sublime-project
+.spyderproject
+.spyproject
 
-# OS
+# =========================
+# OS Files
+# =========================
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
+Desktop.ini
 
-# Project specific
-*.log
-*.sqlite
+# =========================
+# Docker & Database
+# =========================
 postgres_data/
+*.sqlite
+*.sqlite3
+*.db
 
-# ML models
+# =========================
+# Logs & Temp Files
+# =========================
+*.log
+logs/
+*.tmp
+*.temp
+.cache/
+
+# =========================
+# ML/Training Data (Large Files)
+# =========================
 *.joblib
 *.h5
 *.pkl
+*.onnx
 
-# Test
+# Training datasets (large)
+dataset/
+eye_dataset/train/
+eye_dataset/val/
+eye_dataset/yolo_dataset/
+eye_dataset/yolo_runs/
+
+# Keep these model files (they're small and needed)
+# !backend/models/*.pt
+# !backend/models/*.pth
+
+# =========================
+# Testing
+# =========================
 .coverage
 htmlcov/
 .pytest_cache/
-dataset/
-eye_dataset/
+.tox/
+.nox/
+coverage.xml
+*.cover
+*.coverage
+.hypothesis/
+
+# =========================
+# Build Outputs
+# =========================
+frontend/dist/
+driver-hud/dist/
+*.map
+
+# =========================
+# Environment Files
+# =========================
+.env
+.env.local
+.env.*.local
+*.env
+
+# Keep the example
+!env.example

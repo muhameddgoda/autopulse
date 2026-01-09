@@ -50,25 +50,29 @@ class HybridScorer:
     Combines rule-based scoring with ML predictions
     """
     
-    def __init__(self, model_dir: str = "app/ml/trained_models"):
+    def __init__(self, model_dir: str=None):
         self.model_dir = model_dir
         self.rule_scorer = DriverScorer()
         self.feature_extractor = FeatureExtractor()
         self.data_collector = DataCollector()
         
-        # ML models
-        self.behavior_classifier = BehaviorClassifier(model_dir)
-        self.anomaly_detector = AnomalyDetector(model_dir)
+        # ML models (use their default paths if model_dir not specified)
+        self.behavior_classifier = BehaviorClassifier(model_dir) if model_dir else BehaviorClassifier()
+        self.anomaly_detector = AnomalyDetector(model_dir) if model_dir else AnomalyDetector()
         
         # Will be set when loading for specific vehicle
         self.ml_behavior_available = False
         self.ml_anomaly_available = False
         self._loaded_vehicle_id = None
     
-    def load_models_for_vehicle(self, vehicle_id: str) -> bool:
+    def load_models_for_vehicle(self, vehicle_id: str, force_reload: bool=False) -> bool:
         """Load trained models for a specific vehicle"""
-        if self._loaded_vehicle_id == vehicle_id:
+        if self._loaded_vehicle_id == vehicle_id and not force_reload:
             return self.ml_behavior_available or self.ml_anomaly_available
+        
+        # Reset state for fresh load
+        self.ml_behavior_available = False
+        self.ml_anomaly_available = False
         
         # Try vehicle-specific models first
         self.ml_behavior_available = self.behavior_classifier.load(f"behavior_{vehicle_id}")
@@ -86,7 +90,7 @@ class HybridScorer:
     def score_trip(
         self,
         features: TripFeatures,
-        use_ml: bool = True
+        use_ml: bool=True
     ) -> HybridScore:
         """
         Score a trip using rules and ML
@@ -138,7 +142,6 @@ class HybridScorer:
                 result.using_ml = True
             except Exception as e:
                 print(f"ML anomaly detection error: {e}")
-
         
         # 4. Combine results
         result = self._combine_scores(result)
@@ -215,7 +218,7 @@ class HybridScorer:
         
         return result
     
-    def score_to_dict(self, score: HybridScore, rule_result: DriverScore = None) -> Dict:
+    def score_to_dict(self, score: HybridScore, rule_result: DriverScore=None) -> Dict:
         """Convert HybridScore to dictionary"""
         result = {
             "score": score.final_score,
@@ -244,15 +247,14 @@ class HybridScorer:
                 "score": float(score.ml_anomaly_score) if score.ml_anomaly_score is not None else None,
                 "details": score.ml_anomaly_details
             }
-
         
         return result
     
     def train_models(
         self,
         examples: list,
-        train_behavior: bool = True,
-        train_anomaly: bool = True
+        train_behavior: bool=True,
+        train_anomaly: bool=True
     ) -> Dict:
         """
         Train both ML models

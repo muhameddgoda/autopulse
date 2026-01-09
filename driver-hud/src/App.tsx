@@ -11,6 +11,35 @@ import {
 } from "./components/telemetry";
 import { THEME, THRESHOLDS, TelemetryReading } from "./types";
 
+// Drowsiness alert component
+function DrowsinessAlert({ level }: { level: string }) {
+  if (level === "none") return null;
+
+  const isCritical = level === "critical" || level === "alert";
+  const color = isCritical ? THEME.red : THEME.yellow;
+
+  return (
+    <div
+      className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 px-8 py-4 rounded-xl font-bold text-2xl uppercase tracking-wider ${
+        isCritical ? "animate-pulse" : ""
+      }`}
+      style={{
+        backgroundColor: "rgba(0,0,0,0.9)",
+        border: `3px solid ${color}`,
+        color: color,
+        boxShadow: `0 0 40px ${color}, inset 0 0 20px rgba(0,0,0,0.5)`,
+      }}
+    >
+      <div className="flex items-center gap-3">
+        <svg className="w-8 h-8" viewBox="0 0 24 24" fill={color}>
+          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+        </svg>
+        <span>⚠️ DROWSINESS {level.toUpperCase()}</span>
+      </div>
+    </div>
+  );
+}
+
 // API helper
 async function fetchVehicleId(): Promise<string | null> {
   try {
@@ -46,6 +75,30 @@ const DEFAULT_TELEMETRY: Partial<TelemetryReading> = {
 export default function App() {
   const [vehicleId, setVehicleId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [drowsinessLevel, setDrowsinessLevel] = useState<string>("none");
+
+  // Poll for drowsiness alerts
+  useEffect(() => {
+    const checkDrowsiness = async () => {
+      try {
+        // Check if there's an active safety session with drowsiness data
+        const res = await fetch(
+          `http://localhost:8000/api/safety/status/${
+            vehicleId || "68f2ce4a-28df-4f11-bf5b-c961d1f7d064"
+          }`
+        );
+        if (res.ok) {
+          const data = await res.json();
+          setDrowsinessLevel(data?.alert_level || "none");
+        }
+      } catch {
+        // Silently fail - safety monitoring might not be active
+      }
+    };
+
+    const interval = setInterval(checkDrowsiness, 500);
+    return () => clearInterval(interval);
+  }, [vehicleId]);
 
   // Fetch vehicle ID on mount
   useEffect(() => {
@@ -102,6 +155,9 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-black flex items-center justify-center p-4">
+      {/* Drowsiness Warning Overlay */}
+      <DrowsinessAlert level={drowsinessLevel} />
+
       {/* Main HUD Container */}
       <div
         className="rounded-2xl p-6 relative"

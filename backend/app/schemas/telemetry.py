@@ -1,20 +1,19 @@
 """
-AutoPulse Telemetry Schemas (FIXED)
+AutoPulse Telemetry Schemas (Updated with Scoring)
 Pydantic models for API request/response validation
 
-FIXES:
-- Added optional 'timestamp' field to TelemetryReadingCreate for training data
-- Added optional 'end_timestamp' field to TripEnd for simulated trips
+UPDATED: Added driver scoring fields to TripResponse
 """
 
 from datetime import datetime
 from uuid import UUID
+from typing import Optional, List
 from pydantic import BaseModel, Field, ConfigDict
-
 
 # ============================================
 # VEHICLE SCHEMAS
 # ============================================
+
 
 class VehicleBase(BaseModel):
     """Base vehicle data"""
@@ -39,10 +38,10 @@ class VehicleResponse(VehicleBase):
     
     model_config = ConfigDict(from_attributes=True)
 
-
 # ============================================
 # TELEMETRY SCHEMAS
 # ============================================
+
 
 class TelemetryReadingBase(BaseModel):
     """Base telemetry reading data"""
@@ -59,43 +58,43 @@ class TelemetryReadingBase(BaseModel):
     
     # Fuel & electrical
     fuel_level: float = Field(ge=0, le=100, description="Fuel level %")
-    battery_voltage: float = Field(ge=0, le=20, description="Battery voltage V")
+    battery_voltage: float | None = Field(default=12.6, ge=0, le=20, description="Battery voltage V")
     
     # Tire pressure (PSI)
-    tire_pressure_fl: float | None = Field(default=33.0, ge=0, le=60, description="Front Left PSI")
-    tire_pressure_fr: float | None = Field(default=33.0, ge=0, le=60, description="Front Right PSI")
-    tire_pressure_rl: float | None = Field(default=32.0, ge=0, le=60, description="Rear Left PSI")
-    tire_pressure_rr: float | None = Field(default=32.0, ge=0, le=60, description="Rear Right PSI")
+    tire_pressure_fl: float | None = Field(default=33.0, ge=0, le=60)
+    tire_pressure_fr: float | None = Field(default=33.0, ge=0, le=60)
+    tire_pressure_rl: float | None = Field(default=32.0, ge=0, le=60)
+    tire_pressure_rr: float | None = Field(default=32.0, ge=0, le=60)
     
     # Location
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
-    heading: float | None = Field(default=None, ge=0, le=360, description="Heading in degrees")
+    heading: float | None = Field(default=None, ge=0, le=360)
     
-    # Driving mode (optional, sent by simulator)
-    driving_mode: str | None = Field(default=None, description="city, highway, sport")
+    # Driving mode
+    driving_mode: str | None = Field(default=None)
     
     # ML-ready derived metrics
-    acceleration_ms2: float | None = Field(default=None, description="Acceleration m/s²")
-    acceleration_g: float | None = Field(default=None, description="Acceleration in G-force")
-    jerk_ms3: float | None = Field(default=None, description="Rate of acceleration change")
-    is_harsh_braking: bool | None = Field(default=False, description="Currently harsh braking")
-    is_harsh_acceleration: bool | None = Field(default=False, description="Currently harsh accelerating")
-    is_over_rpm: bool | None = Field(default=False, description="RPM above threshold")
-    is_speeding: bool | None = Field(default=False, description="Speed above threshold")
-    is_idling: bool | None = Field(default=False, description="Engine on but not moving")
-    engine_stress_score: float | None = Field(default=None, ge=0, le=100, description="Engine stress 0-100")
+    acceleration_ms2: float | None = None
+    acceleration_g: float | None = None
+    jerk_ms3: float | None = None
+    is_harsh_braking: bool | None = False
+    is_harsh_acceleration: bool | None = False
+    is_over_rpm: bool | None = False
+    is_speeding: bool | None = False
+    is_idling: bool | None = False
+    engine_stress_score: float | None = None
 
 
 class TelemetryReadingCreate(TelemetryReadingBase):
     """Create a new telemetry reading"""
     vehicle_id: UUID
-    # FIXED: Optional timestamp for training data generation
-    # If not provided, server will use current time
-    timestamp: datetime | str | None = Field(
-        default=None, 
-        description="Optional timestamp for the reading (ISO format). If not provided, server uses current time."
-    )
+    time: datetime | str | None = Field(default=None)
+
+
+class TelemetryBatchCreate(BaseModel):
+    """Batch create telemetry readings"""
+    readings: List["TelemetryReadingCreate"]
 
 
 class TelemetryReadingResponse(TelemetryReadingBase):
@@ -105,21 +104,10 @@ class TelemetryReadingResponse(TelemetryReadingBase):
     
     model_config = ConfigDict(from_attributes=True)
 
-
-class TelemetryStreamMessage(TelemetryReadingBase):
-    """WebSocket message format for real-time streaming"""
-    timestamp: datetime
-    vehicle_id: UUID
-    
-    # Computed fields for dashboard
-    engine_status: str = "normal"  # normal, warning, critical
-    
-    model_config = ConfigDict(from_attributes=True)
-
-
 # ============================================
-# TRIP SCHEMAS
+# TRIP SCHEMAS (UPDATED WITH SCORING)
 # ============================================
+
 
 class TripBase(BaseModel):
     """Base trip data"""
@@ -136,15 +124,11 @@ class TripEnd(BaseModel):
     """End an active trip"""
     end_latitude: float | None = None
     end_longitude: float | None = None
-    # FIXED: Optional end timestamp for simulated/training data
-    end_timestamp: datetime | str | None = Field(
-        default=None,
-        description="Optional end timestamp for simulated trips (ISO format). If not provided, server calculates from readings."
-    )
+    end_timestamp: datetime | str | None = None
 
 
 class TripResponse(BaseModel):
-    """Trip response with all details including mode breakdown"""
+    """Trip response with all details including driver scoring"""
     id: UUID
     vehicle_id: UUID
     start_time: datetime
@@ -181,14 +165,94 @@ class TripResponse(BaseModel):
     end_latitude: float | None
     end_longitude: float | None
     
+    # ========================================
+    # NEW: Driver Behavior Scoring
+    # ========================================
+    driver_score: float | None = Field(None, description="Driver behavior score 0-100")
+    behavior_label: str | None = Field(None, description="exemplary, calm, normal, aggressive, dangerous")
+    risk_level: str | None = Field(None, description="low, medium, high, critical")
+    harsh_brake_count: int | None = Field(0, description="Number of harsh braking events")
+    harsh_accel_count: int | None = Field(0, description="Number of harsh acceleration events")
+    speeding_percentage: float | None = Field(0, description="Percentage of trip spent speeding")
+    ml_enhanced: bool | None = Field(False, description="Whether ML model was used for scoring")
+    # ========================================
+    
     created_at: datetime
     
     model_config = ConfigDict(from_attributes=True)
 
 
+class TripWithScoreResponse(BaseModel):
+    """Simplified trip response for sidebar/list display"""
+    id: str
+    vehicle_id: str
+    start_time: datetime
+    end_time: Optional[datetime]
+    is_active: bool
+    
+    # Core stats
+    distance_km: Optional[float]
+    duration_seconds: Optional[int]
+    
+    # Scoring (main focus)
+    driver_score: Optional[float]
+    behavior_label: Optional[str]
+    risk_level: Optional[str]
+    
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TripScoreDetailResponse(BaseModel):
+    """Detailed scoring response with insights"""
+    trip_id: str
+    vehicle_id: str
+    
+    # Trip info
+    start_time: Optional[str]
+    end_time: Optional[str]
+    duration_seconds: Optional[int]
+    distance_km: Optional[float]
+    
+    # Score
+    driver_score: Optional[float]
+    behavior_label: Optional[str]
+    risk_level: Optional[str]
+    ml_enhanced: Optional[bool]
+    
+    # Events
+    harsh_brake_count: int
+    harsh_accel_count: int
+    speeding_percentage: float
+    
+    # Stats
+    avg_speed_kmh: Optional[float]
+    max_speed_kmh: Optional[float]
+    
+    # Analysis
+    summary: dict
+    insights: List[str]
+    recommendations: List[str]
+
+
+class ScoreHistoryItem(BaseModel):
+    """Single score history entry"""
+    trip_id: str
+    date: str
+    score: float
+    behavior: str
+    distance_km: Optional[float]
+
+
+class ScoreHistoryResponse(BaseModel):
+    """Score history for charts"""
+    vehicle_id: str
+    history: List[ScoreHistoryItem]
+    count: int
+
 # ============================================
 # DASHBOARD SCHEMAS
 # ============================================
+
 
 class DashboardState(BaseModel):
     """Complete dashboard state for frontend"""
@@ -196,3 +260,14 @@ class DashboardState(BaseModel):
     telemetry: TelemetryReadingResponse | None
     active_trip: TripResponse | None
     connection_status: str = "connected"
+
+
+class TelemetryStreamMessage(TelemetryReadingBase):
+    """WebSocket message format for real-time streaming"""
+    timestamp: datetime
+    vehicle_id: UUID
+    
+    # Computed fields for dashboard
+    engine_status: str = "normal"  # normal, warning, critical
+    
+    model_config = ConfigDict(from_attributes=True)
