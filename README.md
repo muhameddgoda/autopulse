@@ -171,7 +171,7 @@ This project demonstrates the skills that **German automotive companies** are lo
 ### 1. Clone & Setup Database
 
 ```bash
-git clone https://github.com/yourusername/autopulse.git
+git clone https://github.com/muhameddgoda/autopulse.git
 cd autopulse
 
 # Start PostgreSQL
@@ -334,7 +334,7 @@ autopulse/
 
 ## 👤 Author
 
-**Mohamed Gamal** - BSc Robotics and Intelligent Systems
+**Mohamed Goda Ebrahim** - BSc Robotics and Intelligent Systems
 
 ---
 
