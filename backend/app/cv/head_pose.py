@@ -23,19 +23,19 @@ import time
 class DistractionType(Enum):
     """Types of detected distraction"""
     NONE = "none"
-    LOOKING_DOWN = "looking_down"       # Phone, dashboard
-    LOOKING_LEFT = "looking_left"       # Passenger, window
-    LOOKING_RIGHT = "looking_right"     # Passenger, window
-    LOOKING_UP = "looking_up"           # Rearview mirror (brief OK)
-    HEAD_TILTED = "head_tilted"         # Fatigue indicator
+    LOOKING_DOWN = "looking_down"  # Phone, dashboard
+    LOOKING_LEFT = "looking_left"  # Passenger, window
+    LOOKING_RIGHT = "looking_right"  # Passenger, window
+    LOOKING_UP = "looking_up"  # Rearview mirror (brief OK)
+    HEAD_TILTED = "head_tilted"  # Fatigue indicator
 
 
 @dataclass
 class HeadPose:
     """Head pose angles in degrees"""
     pitch: float  # Up/down (-90 to 90, positive = looking down)
-    yaw: float    # Left/right (-90 to 90, positive = looking right)
-    roll: float   # Head tilt (-90 to 90, positive = tilting right)
+    yaw: float  # Left/right (-90 to 90, positive = looking right)
+    roll: float  # Head tilt (-90 to 90, positive = tilting right)
     
     def to_dict(self) -> Dict:
         return {
@@ -79,15 +79,15 @@ class HeadPoseEstimator:
     - Brief glances (< 1s) are normal driving behavior
     """
     
-    # Thresholds for distraction detection (degrees)
-    PITCH_DOWN_THRESHOLD = 20.0      # Looking down at phone
-    PITCH_UP_THRESHOLD = -25.0       # Looking up (rearview OK briefly)
-    YAW_THRESHOLD = 30.0             # Looking left/right
-    ROLL_THRESHOLD = 25.0            # Head tilted (fatigue)
+    # Thresholds for distraction detection (degrees) - More sensitive
+    PITCH_DOWN_THRESHOLD = 15.0  # Looking down at phone (was 20)
+    PITCH_UP_THRESHOLD = -20.0  # Looking up (was -25)
+    YAW_THRESHOLD = 25.0  # Looking left/right (was 30)
+    ROLL_THRESHOLD = 20.0  # Head tilted - fatigue (was 25)
     
-    # Timing thresholds (milliseconds)
-    DISTRACTION_WARNING_MS = 1000    # 1 second
-    DISTRACTION_ALERT_MS = 2000      # 2 seconds
+    # Timing thresholds (milliseconds) - Faster response
+    DISTRACTION_WARNING_MS = 800  # 0.8 seconds (was 1)
+    DISTRACTION_ALERT_MS = 1500  # 1.5 seconds (was 2)
     
     def __init__(self):
         """Initialize the head pose estimator"""

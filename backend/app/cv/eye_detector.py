@@ -7,10 +7,16 @@ Combines:
 1. MediaPipe for face detection and eye landmark extraction
 2. Trained CNN for eye state classification (open/closed)
 3. EAR as backup confirmation
-4. Temporal smoothing for stable results
+4. Head pose for distraction detection
+5. Yawning detection via MAR
+6. Temporal smoothing for stable results
 
 This replaces the old full-face approach with accurate eye-only detection.
 """
+
+print("=" * 50)
+print("[EYE_DETECTOR MODULE] Loading eye_detector.py...")
+print("=" * 50)
 
 import numpy as np
 from typing import Dict, Optional, List
@@ -28,6 +34,7 @@ try:
     import torch.nn as nn
     from torchvision import transforms, models
     TORCH_AVAILABLE = True
+    print(f"[EYE_DETECTOR MODULE] PyTorch loaded: {torch.__version__}")
 except ImportError:
     TORCH_AVAILABLE = False
     logger.warning("PyTorch not available")
@@ -35,16 +42,36 @@ except ImportError:
 try:
     import cv2
     CV2_AVAILABLE = True
+    print(f"[EYE_DETECTOR MODULE] OpenCV loaded: {cv2.__version__}")
 except ImportError:
     CV2_AVAILABLE = False
     logger.warning("OpenCV not available")
 
+# MediaPipe import - handle both old (solutions) and new (tasks) API
+MEDIAPIPE_AVAILABLE = False
+MEDIAPIPE_API = None  # "solutions" or "tasks"
+mp = None
+
 try:
-    import mediapipe as mp
-    MEDIAPIPE_AVAILABLE = True
+    import mediapipe as _mp
+    mp = _mp
+    # Check which API is available
+    if hasattr(mp, 'solutions') and hasattr(mp.solutions, 'face_mesh'):
+        MEDIAPIPE_AVAILABLE = True
+        MEDIAPIPE_API = "solutions"
+        print(f"[EYE_DETECTOR MODULE] MediaPipe loaded (legacy solutions API)")
+    elif hasattr(mp, 'tasks') and hasattr(mp.tasks, 'vision') and hasattr(mp.tasks.vision, 'FaceLandmarker'):
+        MEDIAPIPE_AVAILABLE = True
+        MEDIAPIPE_API = "tasks"
+        print(f"[EYE_DETECTOR MODULE] MediaPipe loaded (new tasks API, version {mp.__version__})")
+    else:
+        logger.warning(f"MediaPipe {mp.__version__} loaded but no suitable face detection API found")
+        print(f"[EYE_DETECTOR MODULE] MediaPipe loaded but API not compatible")
 except ImportError:
-    MEDIAPIPE_AVAILABLE = False
     logger.warning("MediaPipe not available")
+    print(f"[EYE_DETECTOR MODULE] MediaPipe not installed")
+
+print(f"[EYE_DETECTOR MODULE] TORCH={TORCH_AVAILABLE}, CV2={CV2_AVAILABLE}, MP={MEDIAPIPE_AVAILABLE}, API={MEDIAPIPE_API}")
 
 
 class AlertLevel(Enum):
@@ -53,6 +80,61 @@ class AlertLevel(Enum):
     WARNING = "warning"
     ALERT = "alert"
     CRITICAL = "critical"
+
+
+class DistractionType(Enum):
+    """Types of distraction"""
+    NONE = "none"
+    LOOKING_DOWN = "looking_down"
+    LOOKING_LEFT = "looking_left"
+    LOOKING_RIGHT = "looking_right"
+    LOOKING_UP = "looking_up"
+
+
+@dataclass
+class YawnMetrics:
+    """Yawning metrics"""
+    mar: float  # Mouth Aspect Ratio
+    is_yawning: bool
+    yawn_duration_ms: float
+    yawn_count: int
+    yawns_per_minute: float
+    fatigue_level: str  # low, moderate, high
+    
+    def to_dict(self) -> Dict:
+        return {
+            "mar": round(self.mar, 3),
+            "is_yawning": self.is_yawning,
+            "yawn_duration_ms": round(self.yawn_duration_ms, 1),
+            "yawn_count": self.yawn_count,
+            "yawns_per_minute": round(self.yawns_per_minute, 2),
+            "fatigue_level": self.fatigue_level
+        }
+
+
+@dataclass
+class DistractionMetrics:
+    """Head pose distraction metrics"""
+    pitch: float
+    yaw: float
+    roll: float
+    is_distracted: bool
+    distraction_type: str
+    distraction_duration_ms: float
+    looking_at_road: bool
+    attention_score: float
+    
+    def to_dict(self) -> Dict:
+        return {
+            "pitch": round(self.pitch, 1),
+            "yaw": round(self.yaw, 1),
+            "roll": round(self.roll, 1),
+            "is_distracted": self.is_distracted,
+            "distraction_type": self.distraction_type,
+            "distraction_duration_ms": round(self.distraction_duration_ms, 1),
+            "looking_at_road": self.looking_at_road,
+            "attention_score": round(self.attention_score, 1)
+        }
 
 
 @dataclass
@@ -87,6 +169,12 @@ class EyeDetectionState:
     head_yaw: Optional[float] = None
     head_roll: Optional[float] = None
     
+    # Yawning metrics (NEW)
+    yawn: Optional[YawnMetrics] = None
+    
+    # Distraction metrics (NEW)
+    distraction: Optional[DistractionMetrics] = None
+    
     # Visualization data
     landmarks: Optional[Dict] = None
     eye_bboxes: Optional[tuple] = None
@@ -97,7 +185,7 @@ class EyeDetectionState:
     
     def to_dict(self) -> Dict:
         """Convert to JSON-serializable dict"""
-        return {
+        result = {
             "eye_state": self.eye_state,
             "eyes_closed": bool(self.eyes_closed),
             "confidence": float(round(self.confidence, 3)),
@@ -117,53 +205,70 @@ class EyeDetectionState:
             "timestamp": float(self.timestamp),
             "landmarks": self.landmarks,
         }
-
+        # Add yawn metrics if present
+        if self.yawn:
+            result["yawn"] = self.yawn.to_dict()
+        # Add distraction metrics if present
+        if self.distraction:
+            result["distraction"] = self.distraction.to_dict()
+        return result
 
 # ============================================================================
 # CNN Models (must match training architecture)
 # ============================================================================
 
-class EyeClassifierCNN(nn.Module):
-    """Custom lightweight CNN for eye classification"""
-    def __init__(self, num_classes=2):
-        super().__init__()
-        self.features = nn.Sequential(
-            nn.Conv2d(3, 32, 3, padding=1), nn.BatchNorm2d(32), nn.ReLU(), nn.MaxPool2d(2),
-            nn.Conv2d(32, 64, 3, padding=1), nn.BatchNorm2d(64), nn.ReLU(), nn.MaxPool2d(2),
-            nn.Conv2d(64, 128, 3, padding=1), nn.BatchNorm2d(128), nn.ReLU(), nn.MaxPool2d(2),
-            nn.Conv2d(128, 256, 3, padding=1), nn.BatchNorm2d(256), nn.ReLU(), nn.MaxPool2d(2),
-        )
-        self.classifier = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(256 * 4 * 8, 512), nn.ReLU(), nn.Dropout(0.5),
-            nn.Linear(512, num_classes)
-        )
-    
-    def forward(self, x):
-        return self.classifier(self.features(x))
 
+# Only define these classes if PyTorch is available
+if TORCH_AVAILABLE:
 
-class EyeClassifierMobileNet(nn.Module):
-    """MobileNetV2-based classifier"""
-    def __init__(self, num_classes=2):
-        super().__init__()
-        self.backbone = models.mobilenet_v2(pretrained=False)
-        self.backbone.classifier = nn.Sequential(
-            nn.Dropout(0.2), nn.Linear(1280, 256), nn.ReLU(),
-            nn.Dropout(0.3), nn.Linear(256, num_classes)
-        )
-    
-    def forward(self, x):
-        return self.backbone(x)
+    class EyeClassifierCNN(nn.Module):
+        """Custom lightweight CNN for eye classification"""
 
+        def __init__(self, num_classes=2):
+            super().__init__()
+            self.features = nn.Sequential(
+                nn.Conv2d(3, 32, 3, padding=1), nn.BatchNorm2d(32), nn.ReLU(), nn.MaxPool2d(2),
+                nn.Conv2d(32, 64, 3, padding=1), nn.BatchNorm2d(64), nn.ReLU(), nn.MaxPool2d(2),
+                nn.Conv2d(64, 128, 3, padding=1), nn.BatchNorm2d(128), nn.ReLU(), nn.MaxPool2d(2),
+                nn.Conv2d(128, 256, 3, padding=1), nn.BatchNorm2d(256), nn.ReLU(), nn.MaxPool2d(2),
+            )
+            self.classifier = nn.Sequential(
+                nn.Flatten(),
+                nn.Linear(256 * 4 * 8, 512), nn.ReLU(), nn.Dropout(0.5),
+                nn.Linear(512, num_classes)
+            )
+        
+        def forward(self, x):
+            return self.classifier(self.features(x))
+
+    class EyeClassifierMobileNet(nn.Module):
+        """MobileNetV2-based classifier"""
+
+        def __init__(self, num_classes=2):
+            super().__init__()
+            self.backbone = models.mobilenet_v2(pretrained=False)
+            self.backbone.classifier = nn.Sequential(
+                nn.Dropout(0.2), nn.Linear(1280, 256), nn.ReLU(),
+                nn.Dropout(0.3), nn.Linear(256, num_classes)
+            )
+        
+        def forward(self, x):
+            return self.backbone(x)
 
 # ============================================================================
 # Main Detector Class
 # ============================================================================
 
+
 class EyeDrowsinessDetector:
     """
     Production drowsiness detector using eye classification.
+    
+    Features:
+    - Eye state detection (CNN + EAR)
+    - Yawning detection (MAR algorithm)
+    - Head pose distraction detection
+    - Blink rate monitoring
     
     Usage:
         detector = EyeDrowsinessDetector(model_path="models/eye_classifier.pth")
@@ -178,17 +283,36 @@ class EyeDrowsinessDetector:
     LEFT_EYE_EAR = [362, 385, 387, 263, 373, 380]
     RIGHT_EYE_EAR = [33, 160, 158, 133, 153, 144]
     
-    # Thresholds
-    EAR_THRESHOLD = 0.22
-    WARNING_DURATION_MS = 500
-    ALERT_DURATION_MS = 2000
-    CRITICAL_DURATION_MS = 4000
+    # Mouth landmarks for yawn detection (MAR)
+    MOUTH_TOP = 13
+    MOUTH_BOTTOM = 14
+    MOUTH_LEFT = 61
+    MOUTH_RIGHT = 291
+    UPPER_LIP_MID = [37, 0, 267]
+    LOWER_LIP_MID = [84, 17, 314]
+    
+    # Thresholds - Tuned for better sensitivity
+    EAR_THRESHOLD = 0.26  # Increased from 0.22 for better detection
+    WARNING_DURATION_MS = 300  # Faster warning
+    ALERT_DURATION_MS = 1500  # Faster alert
+    CRITICAL_DURATION_MS = 3000  # Faster critical
+    
+    # Yawn thresholds - More sensitive
+    MAR_THRESHOLD = 0.5  # Lowered from 0.6
+    YAWN_DURATION_MS = 1200  # Reduced from 1500
+    YAWN_COOLDOWN_MS = 1500  # Reduced from 2000
+    
+    # Head pose thresholds (distraction) - More sensitive
+    PITCH_DOWN_THRESHOLD = 15.0  # Looking down (was 20)
+    PITCH_UP_THRESHOLD = -20.0  # Looking up (was -25)
+    YAW_THRESHOLD = 25.0  # Looking left/right (was 30)
+    DISTRACTION_ALERT_MS = 1500  # 1.5 seconds (was 2)
     
     # Image sizes (must match training)
     IMG_HEIGHT = 64
     IMG_WIDTH = 128
     
-    def __init__(self, model_path: str = "models/eye_classifier.pth"):
+    def __init__(self, model_path: str="models/eye_classifier.pth"):
         """
         Initialize the detector.
         
@@ -199,28 +323,75 @@ class EyeDrowsinessDetector:
         self._model = None
         self._device = None
         self._classes = ["closed", "open"]
+        self._face_mesh = None
+        self._transform = None
         
-        # Initialize components
-        if TORCH_AVAILABLE and CV2_AVAILABLE and MEDIAPIPE_AVAILABLE:
+        print(f"[CV INIT] Starting EyeDrowsinessDetector init...")
+        print(f"[CV INIT] TORCH={TORCH_AVAILABLE}, CV2={CV2_AVAILABLE}, MP={MEDIAPIPE_AVAILABLE}")
+        
+        # MediaPipe is required - model is optional (EAR-only mode)
+        if CV2_AVAILABLE and MEDIAPIPE_AVAILABLE:
             try:
-                self._init_model(model_path)
+                # MediaPipe is essential for face/eye detection
+                print(f"[CV INIT] Initializing MediaPipe...")
                 self._init_mediapipe()
-                self._init_transforms()
+                print(f"[CV INIT] MediaPipe initialized successfully!")
+                
+                # Enable detector - we can work with EAR-only mode
                 self._enabled = True
-                logger.info("EyeDrowsinessDetector initialized successfully")
+                
+                # Model loading is optional - enhances accuracy but not required
+                if TORCH_AVAILABLE:
+                    try:
+                        print(f"[CV INIT] Initializing model (optional)...")
+                        self._init_model(model_path)
+                        print(f"[CV INIT] Initializing transforms...")
+                        self._init_transforms()
+                    except Exception as model_err:
+                        print(f"[CV INIT] Model init failed (non-fatal): {model_err}")
+                        logger.warning(f"Model initialization failed, using EAR-only mode: {model_err}")
+                else:
+                    print(f"[CV INIT] PyTorch not available, using EAR-only mode")
+                
+                print(f"[CV INIT] SUCCESS! Detector enabled (model={'loaded' if self._model else 'EAR-only'})")
+                logger.info(f"EyeDrowsinessDetector initialized (mode={'CNN+EAR' if self._model else 'EAR-only'})")
+                
             except Exception as e:
+                print(f"[CV INIT] FAILED: {e}")
+                import traceback
+                traceback.print_exc()
                 logger.error(f"Failed to initialize detector: {e}")
         else:
-            logger.error("Missing dependencies for EyeDrowsinessDetector")
+            missing = []
+            if not CV2_AVAILABLE:
+                missing.append("OpenCV")
+            if not MEDIAPIPE_AVAILABLE:
+                missing.append("MediaPipe")
+            print(f"[CV INIT] Missing required dependencies: {missing}")
+            logger.error(f"Missing dependencies for EyeDrowsinessDetector: {missing}")
         
-        # State tracking
+        # State tracking - faster response
         self._closed_start: Optional[float] = None
         self._closed_duration_ms = 0.0
         self._blink_count = 0
         self._blink_timestamps: List[float] = []
         self._last_eye_state = "open"
         self._prediction_history: List[str] = []
-        self._history_size = 5
+        self._history_size = 3  # Reduced from 5 for faster detection
+        
+        # Yawn tracking (NEW)
+        self._yawn_open_start: Optional[float] = None
+        self._yawn_count = 0
+        self._yawn_timestamps: List[float] = []
+        self._last_yawn_end: float = 0
+        self._mar_history: List[float] = []
+        
+        # Distraction tracking (NEW)
+        self._distraction_start: Optional[float] = None
+        self._attention_history: List[float] = []
+        self._distraction_events = 0
+        self._total_distracted_time = 0.0
+        self._last_distracted = False
         
         # Session stats
         self._session_start = time.time()
@@ -230,43 +401,173 @@ class EyeDrowsinessDetector:
         self._last_update = time.time()
     
     def _init_model(self, model_path: str):
-        """Load the trained model"""
+        """Load the trained model with robust path resolution"""
         import os
         
         self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        if not os.path.exists(model_path):
-            logger.warning(f"Model not found at {model_path}, using EAR-only mode")
+        # Try multiple model paths
+        candidate_paths = []
+        
+        # 1. Exact path provided
+        if os.path.isabs(model_path):
+            candidate_paths.append(model_path)
+        
+        # 2. Relative to backend directory
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        candidate_paths.append(os.path.join(base_dir, model_path))
+        
+        # 3. Relative to backend/models directory
+        candidate_paths.append(os.path.join(base_dir, "models", os.path.basename(model_path)))
+        
+        # 4. Relative to current working directory
+        candidate_paths.append(os.path.join(os.getcwd(), model_path))
+        candidate_paths.append(os.path.join(os.getcwd(), "models", os.path.basename(model_path)))
+        candidate_paths.append(os.path.join(os.getcwd(), "backend", "models", os.path.basename(model_path)))
+        
+        # 5. Try looking for MobileNet model as alternative
+        for base in [base_dir, os.getcwd()]:
+            candidate_paths.append(os.path.join(base, "models", "drowsiness_mobilenetv2.pth"))
+            candidate_paths.append(os.path.join(base, "backend", "models", "drowsiness_mobilenetv2.pth"))
+        
+        # Find first existing model
+        actual_path = None
+        for path in candidate_paths:
+            print(f"[CV DEBUG] Checking model path: {path}")
+            if os.path.exists(path):
+                actual_path = path
+                break
+        
+        if not actual_path:
+            logger.warning(f"No model found in any location. Using EAR-only mode.")
+            print(f"[CV DEBUG] Model NOT found! Will use EAR-only mode (still functional)")
+            print(f"[CV DEBUG] Searched paths: {candidate_paths[:5]}...")
             return
         
-        checkpoint = torch.load(model_path, map_location=self._device)
+        print(f"[CV DEBUG] Model found at: {actual_path}")
         
-        model_type = checkpoint.get("model_type", "custom")
-        if model_type == "mobilenet":
-            self._model = EyeClassifierMobileNet()
-        else:
-            self._model = EyeClassifierCNN()
-        
-        self._model.load_state_dict(checkpoint["model_state_dict"])
-        self._model = self._model.to(self._device)
-        self._model.eval()
-        
-        self._classes = checkpoint.get("classes", ["closed", "open"])
-        
-        logger.info(f"Loaded eye classifier from {model_path}")
-        logger.info(f"  Model type: {model_type}")
-        logger.info(f"  Classes: {self._classes}")
-        logger.info(f"  Device: {self._device}")
+        try:
+            checkpoint = torch.load(actual_path, map_location=self._device, weights_only=False)
+            
+            model_type = checkpoint.get("model_type", "custom")
+            if model_type == "mobilenet" or "mobilenet" in actual_path.lower():
+                self._model = EyeClassifierMobileNet()
+            else:
+                self._model = EyeClassifierCNN()
+            
+            self._model.load_state_dict(checkpoint["model_state_dict"])
+            self._model = self._model.to(self._device)
+            self._model.eval()
+            
+            self._classes = checkpoint.get("classes", ["closed", "open"])
+            
+            logger.info(f"Loaded eye classifier from {actual_path}")
+            logger.info(f"  Model type: {model_type}")
+            logger.info(f"  Classes: {self._classes}")
+            logger.info(f"  Device: {self._device}")
+            print(f"[CV DEBUG] Model loaded successfully!")
+        except Exception as e:
+            logger.warning(f"Failed to load model: {e}. Using EAR-only mode.")
+            print(f"[CV DEBUG] Failed to load model: {e}")
+            import traceback
+            traceback.print_exc()
     
     def _init_mediapipe(self):
-        """Initialize MediaPipe Face Mesh"""
-        self._mp_face_mesh = mp.solutions.face_mesh
-        self._face_mesh = self._mp_face_mesh.FaceMesh(
-            max_num_faces=1,
-            refine_landmarks=True,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5
-        )
+        """Initialize MediaPipe Face Mesh with optimized settings - handles both APIs"""
+        if MEDIAPIPE_API == "solutions":
+            # Legacy solutions API (MediaPipe < 0.10)
+            self._mp_face_mesh = mp.solutions.face_mesh
+            self._face_mesh = self._mp_face_mesh.FaceMesh(
+                max_num_faces=1,
+                refine_landmarks=True,
+                min_detection_confidence=0.3,
+                min_tracking_confidence=0.3,
+                static_image_mode=False
+            )
+            self._mediapipe_mode = "solutions"
+            
+        elif MEDIAPIPE_API == "tasks":
+            # New Tasks API (MediaPipe >= 0.10)
+            import os
+            base_options = mp.tasks.BaseOptions(
+                model_asset_path=self._get_face_landmarker_model()
+            )
+            options = mp.tasks.vision.FaceLandmarkerOptions(
+                base_options=base_options,
+                running_mode=mp.tasks.vision.RunningMode.IMAGE,
+                num_faces=1,
+                min_face_detection_confidence=0.3,
+                min_face_presence_confidence=0.3,
+                min_tracking_confidence=0.3,
+                output_face_blendshapes=False,
+                output_facial_transformation_matrixes=False
+            )
+            self._face_mesh = mp.tasks.vision.FaceLandmarker.create_from_options(options)
+            self._mediapipe_mode = "tasks"
+        else:
+            raise ValueError(f"Unknown MediaPipe API: {MEDIAPIPE_API}")
+    
+    def _get_face_landmarker_model(self) -> str:
+        """Get or download the face landmarker model for Tasks API"""
+        import os
+        import urllib.request
+        
+        # Model paths to check
+        model_filename = "face_landmarker_v2_with_blendshapes.task"
+        candidate_paths = [
+            os.path.join(os.getcwd(), "models", model_filename),
+            os.path.join(os.getcwd(), "backend", "models", model_filename),
+            os.path.join(os.path.dirname(__file__), "..", "..", "models", model_filename),
+        ]
+        
+        for path in candidate_paths:
+            if os.path.exists(path):
+                print(f"[CV INIT] Found FaceLandmarker model at: {path}")
+                return path
+        
+        # Download if not found
+        download_path = candidate_paths[0]
+        os.makedirs(os.path.dirname(download_path), exist_ok=True)
+        
+        model_url = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
+        print(f"[CV INIT] Downloading FaceLandmarker model to {download_path}...")
+        
+        try:
+            urllib.request.urlretrieve(model_url, download_path)
+            print(f"[CV INIT] FaceLandmarker model downloaded successfully!")
+            return download_path
+        except Exception as e:
+            raise RuntimeError(f"Failed to download FaceLandmarker model: {e}")
+    
+    def _get_face_landmarks(self, rgb_frame: np.ndarray):
+        """
+        Get face landmarks from RGB frame - handles both MediaPipe APIs.
+        
+        Args:
+            rgb_frame: RGB image (not BGR!)
+            
+        Returns:
+            Landmarks list or None if no face detected
+        """
+        if self._mediapipe_mode == "solutions":
+            # Legacy solutions API
+            results = self._face_mesh.process(rgb_frame)
+            if results.multi_face_landmarks:
+                return results.multi_face_landmarks[0].landmark
+            return None
+            
+        elif self._mediapipe_mode == "tasks":
+            # New Tasks API - needs mp.Image wrapper
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
+            results = self._face_mesh.detect(mp_image)
+            
+            if results.face_landmarks and len(results.face_landmarks) > 0:
+                # Convert to same format as solutions API (normalized coords with x, y, z)
+                landmarks = results.face_landmarks[0]
+                return landmarks  # Already NormalizedLandmark objects
+            return None
+        
+        return None
     
     def _init_transforms(self):
         """Initialize image preprocessing"""
@@ -306,6 +607,143 @@ class EyeDrowsinessDetector:
         
         return (v1 + v2) / (2.0 * horiz) if horiz > 0 else 0
     
+    def _calculate_mar(self, landmarks, shape) -> float:
+        """Calculate Mouth Aspect Ratio for yawn detection"""
+        h, w = shape[:2]
+        
+        # Get mouth points
+        left = np.array([landmarks[self.MOUTH_LEFT].x * w, landmarks[self.MOUTH_LEFT].y * h])
+        right = np.array([landmarks[self.MOUTH_RIGHT].x * w, landmarks[self.MOUTH_RIGHT].y * h])
+        top = np.array([landmarks[self.MOUTH_TOP].x * w, landmarks[self.MOUTH_TOP].y * h])
+        bottom = np.array([landmarks[self.MOUTH_BOTTOM].x * w, landmarks[self.MOUTH_BOTTOM].y * h])
+        
+        # Additional vertical points
+        upper_pts = [np.array([landmarks[i].x * w, landmarks[i].y * h]) for i in self.UPPER_LIP_MID]
+        lower_pts = [np.array([landmarks[i].x * w, landmarks[i].y * h]) for i in self.LOWER_LIP_MID]
+        
+        # Horizontal distance
+        horizontal = np.linalg.norm(right - left)
+        if horizontal < 1e-6:
+            return 0.0
+        
+        # Vertical distances
+        vertical_main = np.linalg.norm(bottom - top)
+        vertical_left = np.linalg.norm(lower_pts[0] - upper_pts[0])
+        vertical_right = np.linalg.norm(lower_pts[2] - upper_pts[2])
+        vertical_avg = (vertical_main + vertical_left + vertical_right) / 3
+        
+        mar = vertical_avg / horizontal
+        
+        # Smooth MAR
+        self._mar_history.append(mar)
+        if len(self._mar_history) > 3:
+            self._mar_history.pop(0)
+        
+        return np.mean(self._mar_history)
+    
+    def _process_yawn(self, mar: float, current_time: float) -> YawnMetrics:
+        """Process yawn detection from MAR"""
+        mouth_open = mar > self.MAR_THRESHOLD
+        yawn_duration_ms = 0.0
+        is_yawning = False
+        
+        if mouth_open:
+            if self._yawn_open_start is None:
+                self._yawn_open_start = current_time
+            yawn_duration_ms = (current_time - self._yawn_open_start) * 1000
+            
+            if yawn_duration_ms >= self.YAWN_DURATION_MS:
+                is_yawning = True
+        else:
+            # Mouth closed - check if we finished a yawn
+            if self._yawn_open_start is not None:
+                final_duration = (current_time - self._yawn_open_start) * 1000
+                if final_duration >= self.YAWN_DURATION_MS:
+                    time_since_last = (current_time - self._last_yawn_end) * 1000
+                    if time_since_last >= self.YAWN_COOLDOWN_MS:
+                        self._yawn_count += 1
+                        self._yawn_timestamps.append(current_time)
+                        self._last_yawn_end = current_time
+            self._yawn_open_start = None
+        
+        # Calculate yawns per minute (over last 5 minutes)
+        cutoff = current_time - 300
+        recent_yawns = [t for t in self._yawn_timestamps if t > cutoff]
+        if recent_yawns:
+            time_span = min(300, current_time - recent_yawns[0])
+            yawns_per_minute = (len(recent_yawns) / time_span) * 60 if time_span > 0 else 0
+        else:
+            yawns_per_minute = 0.0
+        
+        # Fatigue level based on yawns per 5 minutes
+        yawns_per_5min = yawns_per_minute * 5
+        if yawns_per_5min >= 3:
+            fatigue_level = "high"
+        elif yawns_per_5min >= 2:
+            fatigue_level = "moderate"
+        else:
+            fatigue_level = "low"
+        
+        return YawnMetrics(
+            mar=mar,
+            is_yawning=is_yawning,
+            yawn_duration_ms=yawn_duration_ms,
+            yawn_count=self._yawn_count,
+            yawns_per_minute=yawns_per_minute,
+            fatigue_level=fatigue_level
+        )
+    
+    def _process_distraction(self, pitch: float, yaw: float, roll: float, current_time: float, dt: float) -> DistractionMetrics:
+        """Process head pose for distraction detection"""
+        # Classify distraction type
+        distraction_type = DistractionType.NONE
+        if pitch > self.PITCH_DOWN_THRESHOLD:
+            distraction_type = DistractionType.LOOKING_DOWN
+        elif pitch < self.PITCH_UP_THRESHOLD:
+            distraction_type = DistractionType.LOOKING_UP
+        elif yaw < -self.YAW_THRESHOLD:
+            distraction_type = DistractionType.LOOKING_LEFT
+        elif yaw > self.YAW_THRESHOLD:
+            distraction_type = DistractionType.LOOKING_RIGHT
+        
+        looking_at_road = distraction_type == DistractionType.NONE
+        
+        # Track distraction duration
+        distraction_duration_ms = 0.0
+        if not looking_at_road:
+            if self._distraction_start is None:
+                self._distraction_start = current_time
+            distraction_duration_ms = (current_time - self._distraction_start) * 1000
+        else:
+            self._distraction_start = None
+        
+        # Is distracted if looking away for too long
+        is_distracted = distraction_duration_ms >= self.DISTRACTION_ALERT_MS
+        
+        # Update stats
+        if is_distracted:
+            self._total_distracted_time += dt
+            if not self._last_distracted:
+                self._distraction_events += 1
+        self._last_distracted = is_distracted
+        
+        # Attention score (0-100)
+        self._attention_history.append(1.0 if looking_at_road else 0.0)
+        if len(self._attention_history) > 30:
+            self._attention_history.pop(0)
+        attention_score = (sum(self._attention_history) / len(self._attention_history)) * 100 if self._attention_history else 100
+        
+        return DistractionMetrics(
+            pitch=pitch,
+            yaw=yaw,
+            roll=roll,
+            is_distracted=is_distracted,
+            distraction_type=distraction_type.value,
+            distraction_duration_ms=distraction_duration_ms,
+            looking_at_road=looking_at_road,
+            attention_score=attention_score
+        )
+
     def _extract_eyes(self, frame, landmarks) -> tuple:
         """Extract combined eye region for classification"""
         left_bbox = self._get_eye_bbox(landmarks, self.LEFT_EYE_EXTENDED, frame.shape)
@@ -427,19 +865,23 @@ class EyeDrowsinessDetector:
         
         # Default state for no detection
         if not self._enabled:
+            print(f"[CV DEBUG] Detector not enabled! TORCH={TORCH_AVAILABLE}, CV2={CV2_AVAILABLE}, MP={MEDIAPIPE_AVAILABLE}")
             return self._empty_state(current_time)
         
-        # Process with MediaPipe
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = self._face_mesh.process(rgb)
+        # Check if face_mesh is initialized
+        if self._face_mesh is None:
+            print(f"[CV DEBUG] Face mesh not initialized!")
+            return self._empty_state(current_time)
         
-        if not results.multi_face_landmarks:
+        # Process with MediaPipe - handle both APIs
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        landmarks = self._get_face_landmarks(rgb)
+        
+        if landmarks is None:
             # No face - decay closed duration
             if self._closed_start:
                 self._closed_start = None
             return self._empty_state(current_time, face_detected=False)
-        
-        landmarks = results.multi_face_landmarks[0].landmark
         
         # Calculate EAR
         ear_left = self._calculate_ear(landmarks, self.LEFT_EYE_EAR, frame.shape)
@@ -450,13 +892,14 @@ class EyeDrowsinessDetector:
         eye_img, eye_bboxes = self._extract_eyes(frame, landmarks)
         
         # Classify with CNN (or use EAR as fallback)
-        if eye_img is not None and self._model is not None:
+        if eye_img is not None and self._model is not None and self._transform is not None:
             prediction = self._classify_eyes(eye_img)
             cnn_closed = prediction["class"] == "closed"
             confidence = prediction["confidence"]
         else:
+            # EAR-only mode - use EAR threshold directly
             cnn_closed = ear_avg < self.EAR_THRESHOLD
-            confidence = 0.7 if cnn_closed else 0.8
+            confidence = 0.85 if cnn_closed else 0.9  # Higher confidence for EAR-only
         
         # Smooth predictions
         self._prediction_history.append("closed" if cnn_closed else "open")
@@ -505,6 +948,13 @@ class EyeDrowsinessDetector:
         # Blinks per minute
         bpm = self._update_blink_stats(current_time)
         
+        # ===== NEW: Yawn detection =====
+        mar = self._calculate_mar(landmarks, frame.shape)
+        yawn_metrics = self._process_yawn(mar, current_time)
+        
+        # ===== NEW: Distraction detection =====
+        distraction_metrics = self._process_distraction(pitch, yaw, roll, current_time, dt)
+        
         return EyeDetectionState(
             eye_state="closed" if is_closed else "open",
             eyes_closed=is_closed,
@@ -521,13 +971,15 @@ class EyeDrowsinessDetector:
             head_pitch=pitch,
             head_yaw=yaw,
             head_roll=roll,
+            yawn=yawn_metrics,
+            distraction=distraction_metrics,
             landmarks=viz_landmarks,
             eye_bboxes=eye_bboxes,
             detection_method="eye_classifier" if self._model else "ear_only",
             timestamp=current_time
         )
     
-    def _empty_state(self, current_time: float, face_detected: bool = False) -> EyeDetectionState:
+    def _empty_state(self, current_time: float, face_detected: bool=False) -> EyeDetectionState:
         """Return empty state when no detection"""
         return EyeDetectionState(
             eye_state="unknown",
@@ -571,13 +1023,19 @@ class EyeDrowsinessDetector:
     def get_session_summary(self) -> Dict:
         """Get session statistics"""
         duration = time.time() - self._session_start
+        
+        # Calculate yawns per minute for session
+        yawns_per_minute = (self._yawn_count / (duration / 60)) if duration > 0 else 0
+        
         return {
             "duration_seconds": round(duration, 1),
             "total_drowsy_seconds": round(self._total_closed_time, 1),
-            "total_distracted_seconds": 0.0,
+            "total_distracted_seconds": round(self._total_distracted_time, 1),
             "drowsiness_events": self._drowsiness_events,
-            "distraction_events": 0,
-            "blink_count": self._blink_count
+            "distraction_events": self._distraction_events,
+            "blink_count": self._blink_count,
+            "yawn_count": self._yawn_count,
+            "yawns_per_minute": round(yawns_per_minute, 2)
         }
     
     def reset(self):
@@ -593,6 +1051,18 @@ class EyeDrowsinessDetector:
         self._drowsiness_events = 0
         self._last_drowsy = False
         self._last_update = time.time()
+        # Reset yawn tracking
+        self._yawn_open_start = None
+        self._yawn_count = 0
+        self._yawn_timestamps = []
+        self._last_yawn_end = 0
+        self._mar_history = []
+        # Reset distraction tracking
+        self._distraction_start = None
+        self._attention_history = []
+        self._distraction_events = 0
+        self._total_distracted_time = 0.0
+        self._last_distracted = False
         logger.info("EyeDrowsinessDetector reset")
 
 
@@ -600,12 +1070,21 @@ class EyeDrowsinessDetector:
 _eye_detector: Optional[EyeDrowsinessDetector] = None
 
 
-def get_eye_detector(model_path: str = "models/eye_classifier.pth") -> EyeDrowsinessDetector:
+def get_eye_detector(model_path: str="models/eye_classifier.pth") -> EyeDrowsinessDetector:
     """Get or create the singleton EyeDrowsinessDetector"""
     global _eye_detector
     if _eye_detector is None:
+        print(f"[CV SINGLETON] Creating new EyeDrowsinessDetector instance...")
         _eye_detector = EyeDrowsinessDetector(model_path=model_path)
+        print(f"[CV SINGLETON] Detector created, enabled={_eye_detector.enabled}")
     return _eye_detector
+
+
+def reset_eye_detector():
+    """Reset the singleton detector (useful for reinitializing after errors)"""
+    global _eye_detector
+    _eye_detector = None
+    print(f"[CV SINGLETON] Detector reset, will reinitialize on next call")
 
 
 def is_eye_detector_available() -> bool:

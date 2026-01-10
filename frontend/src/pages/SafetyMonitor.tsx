@@ -11,6 +11,9 @@ import {
   Play,
   Square,
   Car,
+  Frown,
+  Focus,
+  Activity,
 } from "lucide-react";
 import {
   DARK_BG,
@@ -20,6 +23,26 @@ import {
   DARK_TEXT_MUTED,
   ORANGE,
 } from "../constants/theme";
+
+interface YawnMetrics {
+  mar: number;
+  is_yawning: boolean;
+  yawn_duration_ms: number;
+  yawn_count: number;
+  yawns_per_minute: number;
+  fatigue_level: "low" | "moderate" | "high";
+}
+
+interface DistractionMetrics {
+  pitch: number;
+  yaw: number;
+  roll: number;
+  is_distracted: boolean;
+  distraction_type: string;
+  distraction_duration_ms: number;
+  looking_at_road: boolean;
+  attention_score: number;
+}
 
 interface DrowsinessState {
   ear_average: number;
@@ -32,6 +55,8 @@ interface DrowsinessState {
   face_detected: boolean;
   confidence: number;
   landmarks?: { left_eye: number[][]; right_eye: number[][] };
+  yawn?: YawnMetrics;
+  distraction?: DistractionMetrics;
 }
 
 interface SafetyState {
@@ -40,7 +65,11 @@ interface SafetyState {
   session_stats: {
     duration_seconds: number;
     total_drowsy_seconds: number;
+    total_distracted_seconds: number;
     drowsiness_events: number;
+    distraction_events: number;
+    yawn_count: number;
+    yawns_per_minute: number;
   };
 }
 
@@ -182,19 +211,35 @@ const SafetyMonitor: React.FC = () => {
     );
     wsRef.current = ws;
     ws.onopen = () => {
+      console.log("[SAFETY-FE] WebSocket connected!");
       setConnectionStatus("connected");
       setError(null);
       setIsMonitoring(true);
       frameIntervalRef.current = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
           const frame = captureFrame();
-          if (frame) ws.send(JSON.stringify({ type: "frame", data: frame }));
+          if (frame) {
+            console.log("[SAFETY-FE] Sending frame...");
+            ws.send(JSON.stringify({ type: "frame", data: frame }));
+          }
         }
       }, 100);
     };
     ws.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data);
+        console.log(
+          "[SAFETY-FE] Received message:",
+          msg.type,
+          msg.data?.drowsiness?.face_detected
+        );
+        if (msg.type === "error") {
+          // Handle CV not available error
+          setError(msg.message || "CV module not available");
+          setConnectionStatus("disconnected");
+          setIsMonitoring(false);
+          return;
+        }
         if (msg.type === "detection") {
           setSafetyState(msg.data);
           drawLandmarks(msg.data?.drowsiness?.landmarks);
@@ -216,7 +261,7 @@ const SafetyMonitor: React.FC = () => {
         }
       } catch {}
     };
-    ws.onerror = () => setError("Connection error");
+    ws.onerror = () => setError("Connection error - is the backend running?");
     ws.onclose = () => {
       setConnectionStatus("disconnected");
       setIsMonitoring(false);
@@ -581,6 +626,7 @@ const SafetyMonitor: React.FC = () => {
             display: "flex",
             flexDirection: "column",
             gap: 8,
+            overflowY: "auto",
           }}
         >
           {/* Safety Score */}
@@ -621,7 +667,6 @@ const SafetyMonitor: React.FC = () => {
               border: `1px solid ${DARK_BORDER}`,
               borderRadius: 12,
               padding: 12,
-              flex: 1,
             }}
           >
             <div
@@ -675,12 +720,6 @@ const SafetyMonitor: React.FC = () => {
                 </span>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ color: DARK_TEXT_MUTED }}>Confidence</span>
-                <span style={{ color: DARK_TEXT }}>
-                  {((d?.confidence ?? 0) * 100).toFixed(0)}%
-                </span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span style={{ color: DARK_TEXT_MUTED }}>Blinks</span>
                 <span style={{ color: DARK_TEXT }}>{d?.blink_count ?? 0}</span>
               </div>
@@ -697,6 +736,218 @@ const SafetyMonitor: React.FC = () => {
                   <span style={{ color: DARK_TEXT_MUTED }}>Closed</span>
                   <span style={{ color: "#ef4444" }}>
                     {((d?.closed_duration_ms ?? 0) / 1000).toFixed(1)}s
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Yawn Detection - NEW */}
+          <div
+            style={{
+              backgroundColor: DARK_CARD,
+              border: `1px solid ${d?.yawn?.is_yawning ? ORANGE : DARK_BORDER}`,
+              borderRadius: 12,
+              padding: 12,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 10,
+                textTransform: "uppercase",
+                letterSpacing: 1,
+                color: DARK_TEXT_MUTED,
+                marginBottom: 8,
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+              }}
+            >
+              <Frown
+                size={12}
+                style={{
+                  color: d?.yawn?.is_yawning ? ORANGE : DARK_TEXT_MUTED,
+                }}
+              />
+              Yawn Detection
+            </div>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 6,
+                fontSize: 12,
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: DARK_TEXT_MUTED }}>Status</span>
+                <span
+                  style={{
+                    color: d?.yawn?.is_yawning ? ORANGE : "#22c55e",
+                    fontWeight: d?.yawn?.is_yawning ? "bold" : "normal",
+                  }}
+                >
+                  {d?.yawn?.is_yawning ? "🥱 YAWNING" : "Normal"}
+                </span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: DARK_TEXT_MUTED }}>MAR</span>
+                <span
+                  style={{
+                    color: (d?.yawn?.mar ?? 0) > 0.6 ? ORANGE : DARK_TEXT,
+                  }}
+                >
+                  {(d?.yawn?.mar ?? 0).toFixed(3)}
+                </span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: DARK_TEXT_MUTED }}>Yawn Count</span>
+                <span style={{ color: DARK_TEXT }}>
+                  {d?.yawn?.yawn_count ?? 0}
+                </span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: DARK_TEXT_MUTED }}>Yawns/min</span>
+                <span
+                  style={{
+                    color:
+                      (d?.yawn?.yawns_per_minute ?? 0) > 0.4
+                        ? ORANGE
+                        : DARK_TEXT,
+                  }}
+                >
+                  {(d?.yawn?.yawns_per_minute ?? 0).toFixed(2)}
+                </span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: DARK_TEXT_MUTED }}>Fatigue</span>
+                <span
+                  style={{
+                    padding: "2px 8px",
+                    borderRadius: 4,
+                    fontSize: 10,
+                    backgroundColor:
+                      d?.yawn?.fatigue_level === "high"
+                        ? "rgba(239,68,68,0.2)"
+                        : d?.yawn?.fatigue_level === "moderate"
+                        ? "rgba(234,179,8,0.2)"
+                        : "rgba(34,197,94,0.2)",
+                    color:
+                      d?.yawn?.fatigue_level === "high"
+                        ? "#ef4444"
+                        : d?.yawn?.fatigue_level === "moderate"
+                        ? "#eab308"
+                        : "#22c55e",
+                  }}
+                >
+                  {(d?.yawn?.fatigue_level ?? "low").toUpperCase()}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Distraction Detection - NEW */}
+          <div
+            style={{
+              backgroundColor: DARK_CARD,
+              border: `1px solid ${
+                d?.distraction?.is_distracted ? "#ef4444" : DARK_BORDER
+              }`,
+              borderRadius: 12,
+              padding: 12,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 10,
+                textTransform: "uppercase",
+                letterSpacing: 1,
+                color: DARK_TEXT_MUTED,
+                marginBottom: 8,
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+              }}
+            >
+              <Focus
+                size={12}
+                style={{
+                  color: d?.distraction?.is_distracted
+                    ? "#ef4444"
+                    : DARK_TEXT_MUTED,
+                }}
+              />
+              Distraction Detection
+            </div>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 6,
+                fontSize: 12,
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: DARK_TEXT_MUTED }}>Looking at Road</span>
+                <span
+                  style={{
+                    color: d?.distraction?.looking_at_road
+                      ? "#22c55e"
+                      : "#ef4444",
+                    fontWeight: !d?.distraction?.looking_at_road
+                      ? "bold"
+                      : "normal",
+                  }}
+                >
+                  {d?.distraction?.looking_at_road ? "✓ Yes" : "✗ No"}
+                </span>
+              </div>
+              {d?.distraction?.distraction_type &&
+                d.distraction.distraction_type !== "none" && (
+                  <div
+                    style={{ display: "flex", justifyContent: "space-between" }}
+                  >
+                    <span style={{ color: DARK_TEXT_MUTED }}>Type</span>
+                    <span style={{ color: "#ef4444" }}>
+                      {d.distraction.distraction_type
+                        .replace("_", " ")
+                        .toUpperCase()}
+                    </span>
+                  </div>
+                )}
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: DARK_TEXT_MUTED }}>Attention</span>
+                <span
+                  style={{
+                    color:
+                      (d?.distraction?.attention_score ?? 100) >= 80
+                        ? "#22c55e"
+                        : (d?.distraction?.attention_score ?? 100) >= 50
+                        ? "#eab308"
+                        : "#ef4444",
+                  }}
+                >
+                  {(d?.distraction?.attention_score ?? 100).toFixed(0)}%
+                </span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: DARK_TEXT_MUTED }}>Head Pose</span>
+                <span style={{ color: DARK_TEXT, fontSize: 10 }}>
+                  P:{(d?.distraction?.pitch ?? 0).toFixed(0)}° Y:
+                  {(d?.distraction?.yaw ?? 0).toFixed(0)}° R:
+                  {(d?.distraction?.roll ?? 0).toFixed(0)}°
+                </span>
+              </div>
+              {(d?.distraction?.distraction_duration_ms ?? 0) > 0 && (
+                <div
+                  style={{ display: "flex", justifyContent: "space-between" }}
+                >
+                  <span style={{ color: DARK_TEXT_MUTED }}>Duration</span>
+                  <span style={{ color: "#ef4444" }}>
+                    {(
+                      (d?.distraction?.distraction_duration_ms ?? 0) / 1000
+                    ).toFixed(1)}
+                    s
                   </span>
                 </div>
               )}
@@ -767,9 +1018,13 @@ const SafetyMonitor: React.FC = () => {
                 letterSpacing: 1,
                 color: DARK_TEXT_MUTED,
                 marginBottom: 8,
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
               }}
             >
-              Session
+              <Activity size={12} style={{ color: ORANGE }} />
+              Session Stats
             </div>
             <div
               style={{
@@ -789,15 +1044,35 @@ const SafetyMonitor: React.FC = () => {
                 </span>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ color: DARK_TEXT_MUTED }}>Drowsy</span>
+                <span style={{ color: DARK_TEXT_MUTED }}>Drowsy Time</span>
                 <span style={{ color: ORANGE }}>
                   {(stats?.total_drowsy_seconds ?? 0).toFixed(1)}s
                 </span>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ color: DARK_TEXT_MUTED }}>Events</span>
+                <span style={{ color: DARK_TEXT_MUTED }}>Distracted Time</span>
                 <span style={{ color: "#ef4444" }}>
+                  {(stats?.total_distracted_seconds ?? 0).toFixed(1)}s
+                </span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: DARK_TEXT_MUTED }}>Drowsy Events</span>
+                <span style={{ color: ORANGE }}>
                   {stats?.drowsiness_events ?? 0}
+                </span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: DARK_TEXT_MUTED }}>
+                  Distraction Events
+                </span>
+                <span style={{ color: "#ef4444" }}>
+                  {stats?.distraction_events ?? 0}
+                </span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: DARK_TEXT_MUTED }}>Total Yawns</span>
+                <span style={{ color: DARK_TEXT }}>
+                  {stats?.yawn_count ?? 0}
                 </span>
               </div>
             </div>

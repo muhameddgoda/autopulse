@@ -4,7 +4,13 @@
 
 **Your car, smarter. Real-time monitoring, safety alerts, and predictive maintenance.**
 
-[What is AutoPulse?](#-what-is-autopulse) • [Features](#-what-can-it-do) • [See it in Action](#-see-it-in-action) • [Technical Details](#-technical-details)
+[![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-green.svg)](https://fastapi.tiangolo.com)
+[![React](https://img.shields.io/badge/React-18+-61DAFB.svg)](https://reactjs.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5+-3178C6.svg)](https://typescriptlang.org)
+[![MediaPipe](https://img.shields.io/badge/MediaPipe-0.10+-red.svg)](https://mediapipe.dev)
+
+[What is AutoPulse?](#-what-is-autopulse) • [Features](#-what-can-it-do) • [Quick Start](#-quick-start) • [Technical Details](#-technical-details)
 
 </div>
 
@@ -32,7 +38,11 @@ See your car's vital signs in real-time - speed, RPM, engine temperature, fuel l
 Using **machine learning**, AutoPulse analyzes your driving patterns and vehicle data to predict when parts might need attention - before something breaks. No more surprise breakdowns!
 
 ### 👁️ Drowsiness Detection
-A camera watches your eyes while driving. If you start getting drowsy (eyes closing for too long), you'll get an **instant alert** - potentially saving your life. This uses the same AI technology found in modern luxury vehicles.
+A camera watches your eyes while driving using **MediaPipe FaceLandmarker** and **EAR (Eye Aspect Ratio)** algorithms. If you start getting drowsy (eyes closing for too long), you'll get an **instant alert** - potentially saving your life. Features:
+- Real-time eye tracking at 10+ FPS
+- CNN-based eye state classification (MobileNetV2)
+- Yawn detection via Mouth Aspect Ratio (MAR)
+- Head pose distraction detection
 
 ### 🎨 Adaptive Themes
 The interface changes based on how you're driving:
@@ -186,10 +196,21 @@ docker-compose up -d
 ```bash
 cd backend
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+
+# Linux/macOS:
+source venv/bin/activate
+
+# Windows PowerShell:
+.\venv\Scripts\Activate.ps1
+
+# Windows CMD:
+venv\Scripts\activate.bat
+
 pip install -r requirements.txt
 python main.py
 ```
+
+> **Note:** MediaPipe face landmark models (~30MB) are downloaded automatically on first run.
 
 ### 3. Start Frontend
 
@@ -304,8 +325,16 @@ autopulse/
 | Model | Task | Accuracy | Notes |
 |-------|------|----------|-------|
 | Hybrid Scorer | Driver Behavior | 92.7% | XGBoost + Rules |
-| Eye Classifier | Drowsiness | ~96% | MediaPipe + EAR |
-| MobileNetV2 | Eye State | Trained | Backup classifier |
+| EAR Detector | Drowsiness | Real-time | Eye Aspect Ratio algorithm |
+| MobileNetV2 | Eye State | CNN | Backup eye classifier |
+
+### Computer Vision Pipeline
+
+The CV system supports **MediaPipe 0.10+** (Tasks API) for face landmark detection:
+- **468 facial landmarks** tracked in real-time
+- **EAR (Eye Aspect Ratio)** - Primary drowsiness metric
+- **MAR (Mouth Aspect Ratio)** - Yawn detection
+- **Head Pose** - Distraction detection via pitch/yaw angles
 
 ---
 
@@ -323,9 +352,11 @@ autopulse/
 
 ## 🔮 Future Enhancements
 
+- [x] Real-time drowsiness detection
+- [x] Hybrid ML scoring system
 - [ ] Anomaly detection (Isolation Forest)
 - [ ] Failure prediction timeline
-- [ ] Head pose distraction detection
+- [ ] Enhanced head pose distraction detection
 - [ ] PDF report generation
 - [ ] Mobile companion app
 - [ ] Cloud deployment (Railway/Vercel)

@@ -37,14 +37,18 @@ from app.schemas.safety import (
 try:
     from app.cv.eye_detector import (
         get_eye_detector,
+        reset_eye_detector,
         EyeDrowsinessDetector,
         is_eye_detector_available
     )
     CV_AVAILABLE = is_eye_detector_available()
-except ImportError:
+    print(f"[SAFETY API] CV module loaded, available={CV_AVAILABLE}")
+except ImportError as e:
     CV_AVAILABLE = False
     get_eye_detector = None
+    reset_eye_detector = None
     EyeDrowsinessDetector = None
+    print(f"[SAFETY API] CV module import failed: {e}")
 
 # Fallback imports for backward compatibility
 try:
@@ -157,19 +161,32 @@ async def drowsiness_stream(
         "data": { ... detection results ... }
     }
     """
+    # Accept connection first, then check CV availability
+    await websocket.accept()
+    print(f"[SAFETY] WebSocket connection accepted for vehicle {vehicle_id}")
+    
     if not CV_AVAILABLE:
+        print(f"[SAFETY] CV module NOT available!")
+        logger.warning(f"CV module not available for safety WebSocket, vehicle {vehicle_id}")
+        await websocket.send_json({
+            "type": "error",
+            "message": "CV module not available. Install PyTorch: pip install torch torchvision",
+            "cv_available": False
+        })
         await websocket.close(code=1003, reason="CV module not available")
         return
     
-    await websocket.accept()
+    print(f"[SAFETY] CV module available, initializing detector...")
     logger.info(f"Safety WebSocket connected for vehicle {vehicle_id}")
     
     # Use the eye detector
     detector = get_eye_detector(model_path="models/eye_classifier.pth")
+    print(f"[SAFETY] Detector initialized, resetting session...")
     detector.reset()  # Fresh session
     
     frame_count = 0
     last_alert_level = "none"
+    print(f"[SAFETY] Starting frame processing loop...")
     
     try:
         while True:
@@ -184,6 +201,9 @@ async def drowsiness_stream(
                         # Process frame
                         state = detector.process_base64(frame_data)
                         frame_count += 1
+                        
+                        if frame_count <= 3 or frame_count % 50 == 0:
+                            print(f"[SAFETY] Frame {frame_count}: face={state.face_detected}, EAR={state.ear_average:.3f}")
                         
                         # Build response in format frontend expects
                         session_stats = detector.get_session_summary()

@@ -72,8 +72,8 @@ class YOLOAlertLevel(Enum):
 @dataclass
 class YOLODetection:
     """Single YOLO detection result"""
-    class_name: str          # "awake" or "drowsy"
-    confidence: float        # Detection confidence 0-1
+    class_name: str  # "awake" or "drowsy"
+    confidence: float  # Detection confidence 0-1
     bbox: Tuple[int, int, int, int]  # x1, y1, x2, y2
     
     def to_dict(self) -> Dict:
@@ -157,17 +157,17 @@ class YOLODrowsinessDetector:
         state = detector.process_base64(base64_data)
     """
     
-    # Alert thresholds
-    DROWSY_CONFIDENCE_THRESHOLD = 0.5  # Minimum confidence to consider drowsy
-    WARNING_DURATION_MS = 500          # 0.5 seconds
-    ALERT_DURATION_MS = 2000           # 2 seconds
-    CRITICAL_DURATION_MS = 4000        # 4 seconds
+    # Alert thresholds - Tuned for faster response
+    DROWSY_CONFIDENCE_THRESHOLD = 0.4  # Lowered from 0.5 for more sensitivity
+    WARNING_DURATION_MS = 300  # 0.3 seconds (was 0.5)
+    ALERT_DURATION_MS = 1500  # 1.5 seconds (was 2)
+    CRITICAL_DURATION_MS = 3000  # 3 seconds (was 4)
     
     def __init__(
         self,
-        model_path: Optional[str] = None,
-        use_fallback: bool = True,
-        confidence_threshold: float = 0.5
+        model_path: Optional[str]=None,
+        use_fallback: bool=True,
+        confidence_threshold: float=0.5
     ):
         """
         Initialize the YOLO drowsiness detector.
@@ -211,26 +211,52 @@ class YOLODrowsinessDetector:
         if not self._enabled and not self._fallback_tracker:
             logger.error("No detection method available!")
     
-    def _init_yolo(self, model_path: Optional[str] = None):
-        """Initialize YOLO model"""
+    def _init_yolo(self, model_path: Optional[str]=None):
+        """Initialize YOLO model with robust path resolution"""
+        import os
+        
+        # Try to find the trained drowsiness model
+        candidate_paths = []
+        
+        if model_path:
+            candidate_paths.append(model_path)
+        
+        # Common locations for trained model
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        candidate_paths.extend([
+            os.path.join(base_dir, "models", "drowsiness_yolo11n.pt"),
+            os.path.join(os.getcwd(), "models", "drowsiness_yolo11n.pt"),
+            os.path.join(os.getcwd(), "backend", "models", "drowsiness_yolo11n.pt"),
+            # Fallback to generic YOLO models
+            os.path.join(base_dir, "models", "yolov8n-face.pt"),
+        ])
+        
+        actual_path = None
+        for path in candidate_paths:
+            if os.path.exists(path):
+                actual_path = path
+                logger.info(f"Found YOLO model at: {path}")
+                break
+        
         if YOLO_VERSION == "v8":
             # YOLOv8 with ultralytics
-            if model_path and os.path.exists(model_path):
-                self._model = YOLO(model_path)
-                logger.info(f"Loaded custom YOLOv8 model from {model_path}")
+            if actual_path:
+                self._model = YOLO(actual_path)
+                logger.info(f"Loaded custom YOLOv8 model from {actual_path}")
             else:
-                # Use YOLOv8n (nano) for face detection as base
-                # In production, you'd train a custom model with awake/drowsy classes
+                # Use YOLOv8n-face for face detection as base
                 self._model = YOLO('yolov8n.pt')
-                logger.info("Loaded default YOLOv8n model")
+                logger.info("Loaded default YOLOv8n model (using MediaPipe for drowsiness)")
+                # Note: Default model won't detect drowsiness directly
+                # We'll rely on MediaPipe fallback for actual drowsiness detection
                 
         elif YOLO_VERSION == "v5":
             # YOLOv5 with torch.hub
             import torch
-            if model_path and os.path.exists(model_path):
-                self._model = torch.hub.load('ultralytics/yolov5', 'custom', 
-                                            path=model_path, force_reload=False)
-                logger.info(f"Loaded custom YOLOv5 model from {model_path}")
+            if actual_path:
+                self._model = torch.hub.load('ultralytics/yolov5', 'custom',
+                                            path=actual_path, force_reload=False)
+                logger.info(f"Loaded custom YOLOv5 model from {actual_path}")
             else:
                 self._model = torch.hub.load('ultralytics/yolov5', 'yolov5s')
                 logger.info("Loaded default YOLOv5s model")
@@ -315,7 +341,7 @@ class YOLODrowsinessDetector:
                     right_eye_x = x2 - w // 4
                     eye_y = y1 + h // 3
                     landmarks = {
-                        "left_eye": [[left_eye_x - 10, eye_y], [left_eye_x, eye_y - 5], 
+                        "left_eye": [[left_eye_x - 10, eye_y], [left_eye_x, eye_y - 5],
                                     [left_eye_x + 10, eye_y], [left_eye_x, eye_y + 5]],
                         "right_eye": [[right_eye_x - 10, eye_y], [right_eye_x, eye_y - 5],
                                      [right_eye_x + 10, eye_y], [right_eye_x, eye_y + 5]]
@@ -450,7 +476,7 @@ class YOLODrowsinessDetector:
                 self._drowsiness_events += 1
         self._last_drowsy = state.is_drowsy
     
-    def _empty_state(self, current_time: float, face_detected: bool = False) -> YOLODrowsinessState:
+    def _empty_state(self, current_time: float, face_detected: bool=False) -> YOLODrowsinessState:
         """Return empty state when no detection possible"""
         return YOLODrowsinessState(
             is_drowsy=False,
@@ -520,7 +546,7 @@ class YOLODrowsinessDetector:
 _yolo_detector: Optional[YOLODrowsinessDetector] = None
 
 
-def get_yolo_detector(model_path: Optional[str] = None) -> YOLODrowsinessDetector:
+def get_yolo_detector(model_path: Optional[str]=None) -> YOLODrowsinessDetector:
     """Get or create the singleton YOLODrowsinessDetector"""
     global _yolo_detector
     if _yolo_detector is None:

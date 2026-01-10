@@ -26,6 +26,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+package-lock.json
 
 # =========================
 # IDE & Editors
@@ -78,14 +79,27 @@ logs/
 
 # Training datasets (large)
 dataset/
-eye_dataset/train/
-eye_dataset/val/
-eye_dataset/yolo_dataset/
-eye_dataset/yolo_runs/
+eye_dataset/
+app/ml/training_data/
+backend/app/ml/training_data/
 
-# Keep these model files (they're small and needed)
-# !backend/models/*.pt
-# !backend/models/*.pth
+# YOLO training runs
+runs/
+yolo_runs/
+
+# =========================
+# MediaPipe Models (Auto-downloaded)
+# =========================
+# These are auto-downloaded at runtime
+face_landmarker*.task
+
+# =========================
+# Keep These Model Files
+# =========================
+# Small trained models needed for the app
+!backend/models/*.pt
+!backend/models/*.pth
+!backend/models/models_gitkeep.txt
 
 # =========================
 # Testing
@@ -117,3 +131,12 @@ driver-hud/dist/
 
 # Keep the example
 !env.example
+
+# =========================
+# Misc
+# =========================
+*.bak
+*.orig
+.turbo/
+.vercel/
+.netlify/

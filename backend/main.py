@@ -33,18 +33,18 @@ settings = get_settings()
 async def lifespan(app: FastAPI):
     """Application lifespan events"""
     # Startup
-    print("🚗 AutoPulse starting up...")
+    print("[AutoPulse] Starting up...")
     try:
         await init_db()
-        print("✅ Database connected")
+        print("[AutoPulse] Database connected")
     except Exception as e:
-        print(f"⚠️ Database connection failed: {e}")
-        print("⚠️ Running without database - some features will be limited")
+        print(f"[AutoPulse] Database connection failed: {e}")
+        print("[AutoPulse] Running without database - some features will be limited")
     
     yield
     
     # Shutdown
-    print("🛑 AutoPulse shutting down...")
+    print("[AutoPulse] Shutting down...")
 
 
 # Create FastAPI app
@@ -61,9 +61,13 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",
         "http://localhost:5174",
+        "http://localhost:5175",
+        "http://localhost:5176",
         "http://localhost:3000",
         "http://127.0.0.1:5173",
         "http://127.0.0.1:5174",
+        "http://127.0.0.1:5175",
+        "http://127.0.0.1:5176",
         "http://127.0.0.1:3000",
     ],
     allow_credentials=True,

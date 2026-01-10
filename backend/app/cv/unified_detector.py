@@ -31,7 +31,7 @@ except ImportError:
 # Import detection backends
 try:
     from app.cv.yolo_detector import (
-        YOLODrowsinessDetector, 
+        YOLODrowsinessDetector,
         YOLODrowsinessState,
         is_yolo_available,
         YOLO_AVAILABLE
@@ -58,7 +58,7 @@ class DetectionMethod(Enum):
     YOLO = "yolo"
     MEDIAPIPE = "mediapipe"
     HYBRID = "hybrid"  # YOLO + MediaPipe combined
-    AUTO = "auto"      # Automatically select best available
+    AUTO = "auto"  # Automatically select best available
 
 
 class UnifiedAlertLevel(Enum):
@@ -168,17 +168,17 @@ class UnifiedDrowsinessDetector:
         state = detector.process_base64(base64_data)
     """
     
-    # Thresholds
-    WARNING_DURATION_MS = 500
-    ALERT_DURATION_MS = 2000
-    CRITICAL_DURATION_MS = 4000
-    DROWSY_CONFIDENCE_THRESHOLD = 0.5
+    # Thresholds - Tuned for faster response
+    WARNING_DURATION_MS = 300  # Was 500
+    ALERT_DURATION_MS = 1500  # Was 2000
+    CRITICAL_DURATION_MS = 3000  # Was 4000
+    DROWSY_CONFIDENCE_THRESHOLD = 0.4  # Was 0.5
     
     def __init__(
         self,
-        method: DetectionMethod = DetectionMethod.AUTO,
-        yolo_model_path: Optional[str] = None,
-        use_hybrid: bool = True
+        method: DetectionMethod=DetectionMethod.AUTO,
+        yolo_model_path: Optional[str]=None,
+        use_hybrid: bool=True
     ):
         """
         Initialize the unified detector.
@@ -298,12 +298,12 @@ class UnifiedDrowsinessDetector:
         return self._combine_results(yolo_state, mp_state, current_time)
     
     def _combine_results(
-        self, 
-        yolo_state: Optional[Any], 
+        self,
+        yolo_state: Optional[Any],
         mp_state: Optional[DrowsinessState],
         current_time: float
     ) -> UnifiedDrowsinessState:
-        """Intelligently combine YOLO and MediaPipe results"""
+        """Intelligently combine YOLO and MediaPipe results with improved sensitivity"""
         
         # Determine drowsiness from both sources
         yolo_drowsy = yolo_state.is_drowsy if yolo_state else False
@@ -314,30 +314,42 @@ class UnifiedDrowsinessDetector:
         mp_face = mp_state.face_detected if mp_state else False
         mp_ear = mp_state.ear_average if mp_state else 0.3
         mp_eyes_closed = mp_state.eyes_closed if mp_state else False
+        mp_closed_duration = mp_state.closed_duration_ms if mp_state else 0
         
-        # Combined logic:
-        # - If YOLO says drowsy with high confidence, trust it
-        # - If MediaPipe says eyes closed, trust it
-        # - Combine for final decision
+        # Combined logic - More sensitive:
+        # - Trust MediaPipe EAR-based detection (more reliable for eye state)
+        # - YOLO can boost confidence when it agrees
         is_drowsy = False
         combined_conf = 0.0
         
-        if yolo_conf > 0.7:
+        # Primary: MediaPipe eye closure detection (most reliable)
+        if mp_state and mp_eyes_closed:
+            # Eyes are closed according to EAR
+            if mp_closed_duration > 200:  # More than 200ms = likely drowsy
+                is_drowsy = True
+                combined_conf = min(0.6 + (mp_closed_duration / 2000) * 0.4, 1.0)
+            elif mp_drowsy:
+                is_drowsy = True
+                combined_conf = 0.7
+        
+        # YOLO can boost or confirm
+        if yolo_conf > 0.6:
             # High confidence YOLO detection
-            is_drowsy = yolo_drowsy
-            combined_conf = yolo_conf
-        elif mp_state and mp_eyes_closed:
-            # MediaPipe detected closed eyes
-            is_drowsy = mp_drowsy or mp_state.closed_duration_ms > 500
-            combined_conf = 0.8 if mp_state.closed_duration_ms > 500 else 0.5
+            if yolo_drowsy:
+                is_drowsy = True
+                combined_conf = max(combined_conf, yolo_conf)
+            elif is_drowsy:
+                # YOLO says awake but MediaPipe says drowsy - trust MediaPipe but lower confidence
+                combined_conf = combined_conf * 0.8
         elif yolo_drowsy and mp_eyes_closed:
-            # Both agree
+            # Both agree - high confidence
             is_drowsy = True
-            combined_conf = max(yolo_conf, 0.7)
-        elif yolo_drowsy or mp_drowsy:
-            # One says drowsy
-            is_drowsy = yolo_drowsy or mp_drowsy
-            combined_conf = max(yolo_conf, 0.5 if mp_drowsy else 0.0)
+            combined_conf = max(yolo_conf + 0.2, combined_conf, 0.75)
+        
+        # EAR-based override: very low EAR = definitely drowsy
+        if mp_ear < 0.20:  # Very closed eyes
+            is_drowsy = True
+            combined_conf = max(combined_conf, 0.85)
         
         # Face detection - trust either
         face_detected = yolo_face or mp_face
@@ -595,8 +607,8 @@ _unified_detector: Optional[UnifiedDrowsinessDetector] = None
 
 
 def get_unified_detector(
-    method: DetectionMethod = DetectionMethod.AUTO,
-    yolo_model_path: Optional[str] = None
+    method: DetectionMethod=DetectionMethod.AUTO,
+    yolo_model_path: Optional[str]=None
 ) -> UnifiedDrowsinessDetector:
     """Get or create the singleton UnifiedDrowsinessDetector"""
     global _unified_detector

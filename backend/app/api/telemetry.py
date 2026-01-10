@@ -740,3 +740,217 @@ async def get_ml_summary_compat(vehicle_id: UUID, days: int=7, db: AsyncSession=
     """[COMPAT] Get ML summary - redirects to /api/scoring/summary/{vehicle_id}"""
     from app.api.scoring import get_driver_summary
     return await get_driver_summary(str(vehicle_id), days, db)
+
+# ============================================
+# ANOMALY DETECTION
+# ============================================
+
+
+@router.get("/anomaly/status")
+async def get_anomaly_status():
+    """Check if anomaly detection is available and get statistics"""
+    try:
+        from app.ml.anomaly_detector import get_anomaly_detector, is_anomaly_detection_available
+        
+        if not is_anomaly_detection_available():
+            return {
+                "available": False,
+                "message": "scikit-learn not installed"
+            }
+        
+        detector = get_anomaly_detector()
+        stats = detector.get_statistics()
+        
+        return {
+            "available": True,
+            "enabled": stats["enabled"],
+            "is_fitted": stats["is_fitted"],
+            "statistics": stats
+        }
+    except Exception as e:
+        return {
+            "available": False,
+            "error": str(e)
+        }
+
+
+@router.post("/anomaly/train/{vehicle_id}")
+async def train_anomaly_detector(
+    vehicle_id: UUID,
+    hours: int=Query(default=24, description="Hours of history to use for training"),
+    db: AsyncSession=Depends(get_db)
+):
+    """
+    Train the anomaly detector on historical telemetry data.
+    
+    Uses Isolation Forest to learn normal patterns from recent data.
+    """
+    try:
+        from app.ml.anomaly_detector import get_anomaly_detector, is_anomaly_detection_available
+        import pandas as pd
+        
+        if not is_anomaly_detection_available():
+            raise HTTPException(status_code=503, detail="Anomaly detection not available")
+        
+        # Get historical data
+        cutoff = utc_now() - timedelta(hours=hours)
+        result = await db.execute(
+            select(TelemetryReading)
+            .where(TelemetryReading.vehicle_id == vehicle_id)
+            .where(TelemetryReading.time >= cutoff)
+            .order_by(TelemetryReading.time)
+        )
+        readings = result.scalars().all()
+        
+        if len(readings) < 50:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Insufficient data: {len(readings)} readings (need at least 50)"
+            )
+        
+        # Convert to DataFrame
+        data = []
+        for r in readings:
+            data.append({
+                'speed_kmh': r.speed_kmh or 0,
+                'rpm': r.rpm or 0,
+                'engine_temp_c': r.engine_temp or 90,
+                'coolant_temp_c': r.oil_temp or 85,
+                'fuel_level_pct': r.fuel_level or 50,
+                'battery_voltage': r.battery_voltage or 12.5,
+                'oil_pressure_bar': r.oil_pressure or 3.0,
+                'throttle_position_pct': r.throttle_position or 0,
+                'engine_load_pct': r.engine_stress_score or 50,
+                'tire_pressure_fl': r.tire_pressure_fl or 2.2,
+                'tire_pressure_fr': r.tire_pressure_fr or 2.2,
+                'tire_pressure_rl': r.tire_pressure_rl or 2.2,
+                'tire_pressure_rr': r.tire_pressure_rr or 2.2
+            })
+        
+        df = pd.DataFrame(data)
+        
+        # Train detector
+        detector = get_anomaly_detector()
+        detector.fit(df)
+        
+        return {
+            "success": True,
+            "message": f"Anomaly detector trained on {len(readings)} readings",
+            "statistics": detector.get_statistics()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/anomaly/detect")
+async def detect_anomaly(reading: TelemetryReadingCreate):
+    """
+    Detect if a single telemetry reading is anomalous.
+    
+    Returns anomaly score, severity, and details.
+    """
+    try:
+        from app.ml.anomaly_detector import get_anomaly_detector, is_anomaly_detection_available
+        
+        if not is_anomaly_detection_available():
+            raise HTTPException(status_code=503, detail="Anomaly detection not available")
+        
+        detector = get_anomaly_detector()
+        
+        # Convert reading to dict for detector
+        reading_dict = {
+            'speed_kmh': reading.speed_kmh or 0,
+            'rpm': reading.rpm or 0,
+            'engine_temp_c': reading.engine_temp or 90,
+            'coolant_temp_c': reading.oil_temp or 85,
+            'fuel_level_pct': reading.fuel_level or 50,
+            'battery_voltage': reading.battery_voltage or 12.5,
+            'oil_pressure_bar': reading.oil_pressure or 3.0,
+            'throttle_position_pct': reading.throttle_position or 0,
+            'engine_load_pct': reading.engine_stress_score or 50,
+            'tire_pressure_fl': reading.tire_pressure_fl or 2.2,
+            'tire_pressure_fr': reading.tire_pressure_fr or 2.2,
+            'tire_pressure_rl': reading.tire_pressure_rl or 2.2,
+            'tire_pressure_rr': reading.tire_pressure_rr or 2.2
+        }
+        
+        result = detector.detect(reading_dict)
+        
+        return result.to_dict()
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/anomaly/recent/{vehicle_id}")
+async def get_recent_anomalies(
+    vehicle_id: UUID,
+    limit: int=Query(default=100, description="Number of recent readings to analyze"),
+    db: AsyncSession=Depends(get_db)
+):
+    """
+    Analyze recent telemetry for anomalies.
+    
+    Returns list of anomalous readings with details.
+    """
+    try:
+        from app.ml.anomaly_detector import get_anomaly_detector, is_anomaly_detection_available
+        
+        if not is_anomaly_detection_available():
+            raise HTTPException(status_code=503, detail="Anomaly detection not available")
+        
+        detector = get_anomaly_detector()
+        
+        # Get recent readings
+        result = await db.execute(
+            select(TelemetryReading)
+            .where(TelemetryReading.vehicle_id == vehicle_id)
+            .order_by(TelemetryReading.time.desc())
+            .limit(limit)
+        )
+        readings = result.scalars().all()
+        
+        anomalies = []
+        for r in readings:
+            reading_dict = {
+                'speed_kmh': r.speed_kmh or 0,
+                'rpm': r.rpm or 0,
+                'engine_temp_c': r.engine_temp or 90,
+                'coolant_temp_c': r.oil_temp or 85,
+                'fuel_level_pct': r.fuel_level or 50,
+                'battery_voltage': r.battery_voltage or 12.5,
+                'oil_pressure_bar': r.oil_pressure or 3.0,
+                'throttle_position_pct': r.throttle_position or 0,
+                'engine_load_pct': r.engine_stress_score or 50,
+                'tire_pressure_fl': r.tire_pressure_fl or 2.2,
+                'tire_pressure_fr': r.tire_pressure_fr or 2.2,
+                'tire_pressure_rl': r.tire_pressure_rl or 2.2,
+                'tire_pressure_rr': r.tire_pressure_rr or 2.2
+            }
+            
+            detection = detector.detect(reading_dict)
+            
+            if detection.is_anomaly:
+                anomalies.append({
+                    "reading_time": r.time.isoformat() if r.time else None,
+                    "anomaly": detection.to_dict()
+                })
+        
+        return {
+            "vehicle_id": str(vehicle_id),
+            "analyzed_count": len(readings),
+            "anomaly_count": len(anomalies),
+            "anomaly_rate": round(len(anomalies) / max(1, len(readings)), 4),
+            "anomalies": anomalies[:20],  # Return top 20 most recent anomalies
+            "detector_stats": detector.get_statistics()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

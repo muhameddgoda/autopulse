@@ -18,29 +18,45 @@ from dataclasses import dataclass
 from enum import Enum
 import time
 
+# MediaPipe import - handle both old (solutions) and new (tasks) API
+MEDIAPIPE_AVAILABLE = False
+MEDIAPIPE_API = None  # "solutions" or "tasks"
+mp = None
+cv2 = None
+
 try:
-    import mediapipe as mp
-    import cv2
-    MEDIAPIPE_AVAILABLE = True
+    import cv2 as _cv2
+    cv2 = _cv2
 except ImportError:
-    MEDIAPIPE_AVAILABLE = False
-    mp = None
-    cv2 = None
+    pass
+
+try:
+    import mediapipe as _mp
+    mp = _mp
+    # Check which API is available
+    if hasattr(mp, 'solutions') and hasattr(mp.solutions, 'face_mesh'):
+        MEDIAPIPE_AVAILABLE = True
+        MEDIAPIPE_API = "solutions"
+    elif hasattr(mp, 'tasks') and hasattr(mp.tasks, 'vision') and hasattr(mp.tasks.vision, 'FaceLandmarker'):
+        MEDIAPIPE_AVAILABLE = True
+        MEDIAPIPE_API = "tasks"
+except ImportError:
+    pass
 
 
 class AlertLevel(Enum):
     """Drowsiness alert severity levels"""
     NONE = "none"
-    WARNING = "warning"      # Eyes closing, might be drowsy
-    ALERT = "alert"          # Confirmed drowsiness
-    CRITICAL = "critical"    # Prolonged drowsiness - immediate action needed
+    WARNING = "warning"  # Eyes closing, might be drowsy
+    ALERT = "alert"  # Confirmed drowsiness
+    CRITICAL = "critical"  # Prolonged drowsiness - immediate action needed
 
 
 @dataclass
 class EyeMetrics:
     """Metrics for a single eye"""
-    ear: float              # Eye Aspect Ratio
-    is_open: bool           # Whether eye is considered open
+    ear: float  # Eye Aspect Ratio
+    is_open: bool  # Whether eye is considered open
     landmarks: List[Tuple[int, int]]  # Eye landmark pixel coordinates
 
 
@@ -134,32 +150,32 @@ class EyeTracker:
                  397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136,
                  172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109]
     
-    # Thresholds
-    EAR_THRESHOLD = 0.22           # Below this = eyes closed
-    EAR_THRESHOLD_LOW = 0.18       # Very closed eyes
+    # Thresholds - Tuned for better sensitivity
+    EAR_THRESHOLD = 0.26  # Below this = eyes closed (increased from 0.22)
+    EAR_THRESHOLD_LOW = 0.21  # Very closed eyes (increased from 0.18)
     
-    # Timing thresholds (milliseconds)
-    WARNING_DURATION_MS = 500      # 0.5 seconds
-    ALERT_DURATION_MS = 2000       # 2 seconds  
-    CRITICAL_DURATION_MS = 4000    # 4 seconds
+    # Timing thresholds (milliseconds) - More responsive
+    WARNING_DURATION_MS = 300  # 0.3 seconds (was 0.5)
+    ALERT_DURATION_MS = 1500  # 1.5 seconds (was 2)  
+    CRITICAL_DURATION_MS = 3000  # 3 seconds (was 4)
     
     # Blink detection
-    BLINK_DURATION_MAX_MS = 400    # Max duration for a blink (vs drowsiness)
-    HIGH_BLINK_RATE = 25           # Blinks per minute indicating fatigue
+    BLINK_DURATION_MAX_MS = 350  # Max duration for a blink (reduced)
+    HIGH_BLINK_RATE = 22  # Blinks per minute indicating fatigue (more sensitive)
     
     def __init__(
         self,
-        ear_threshold: float = 0.22,
-        min_detection_confidence: float = 0.5,
-        min_tracking_confidence: float = 0.5
+        ear_threshold: float=0.26,
+        min_detection_confidence: float=0.3,
+        min_tracking_confidence: float=0.3
     ):
         """
         Initialize the eye tracker.
         
         Args:
-            ear_threshold: EAR below this is considered "closed"
-            min_detection_confidence: MediaPipe face detection confidence
-            min_tracking_confidence: MediaPipe face tracking confidence
+            ear_threshold: EAR below this is considered "closed" (tuned for sensitivity)
+            min_detection_confidence: MediaPipe face detection confidence (lower = more detections)
+            min_tracking_confidence: MediaPipe face tracking confidence (lower = smoother tracking)
         """
         if not MEDIAPIPE_AVAILABLE:
             raise ImportError(
@@ -168,15 +184,34 @@ class EyeTracker:
             )
         
         self.ear_threshold = ear_threshold
+        self._mediapipe_mode = MEDIAPIPE_API
         
-        # Initialize MediaPipe Face Mesh
-        self.mp_face_mesh = mp.solutions.face_mesh
-        self.face_mesh = self.mp_face_mesh.FaceMesh(
-            max_num_faces=1,
-            refine_landmarks=True,  # Includes iris landmarks
-            min_detection_confidence=min_detection_confidence,
-            min_tracking_confidence=min_tracking_confidence
-        )
+        # Initialize MediaPipe Face Mesh based on available API
+        if MEDIAPIPE_API == "solutions":
+            self.mp_face_mesh = mp.solutions.face_mesh
+            self.face_mesh = self.mp_face_mesh.FaceMesh(
+                max_num_faces=1,
+                refine_landmarks=True,
+                min_detection_confidence=min_detection_confidence,
+                min_tracking_confidence=min_tracking_confidence,
+                static_image_mode=False
+            )
+        elif MEDIAPIPE_API == "tasks":
+            # New Tasks API
+            import os
+            model_path = self._get_face_landmarker_model()
+            base_options = mp.tasks.BaseOptions(model_asset_path=model_path)
+            options = mp.tasks.vision.FaceLandmarkerOptions(
+                base_options=base_options,
+                running_mode=mp.tasks.vision.RunningMode.IMAGE,
+                num_faces=1,
+                min_face_detection_confidence=min_detection_confidence,
+                min_face_presence_confidence=min_detection_confidence,
+                min_tracking_confidence=min_tracking_confidence,
+                output_face_blendshapes=False,
+                output_facial_transformation_matrixes=False
+            )
+            self.face_mesh = mp.tasks.vision.FaceLandmarker.create_from_options(options)
         
         # State tracking
         self._eyes_closed_start: Optional[float] = None
@@ -185,10 +220,39 @@ class EyeTracker:
         self._last_ear: float = 0.3
         self._was_closed: bool = False
         
-        # For smoothing
+        # For smoothing - reduced for faster response
         self._ear_history: List[float] = []
-        self._history_size = 5
-        
+        self._history_size = 3  # Reduced from 5 for faster detection
+    
+    def _get_face_landmarker_model(self) -> str:
+        """Get face landmarker model path for Tasks API"""
+        import os
+        model_filename = "face_landmarker_v2_with_blendshapes.task"
+        candidate_paths = [
+            os.path.join(os.getcwd(), "models", model_filename),
+            os.path.join(os.getcwd(), "backend", "models", model_filename),
+        ]
+        for path in candidate_paths:
+            if os.path.exists(path):
+                return path
+        # Return first path and hope it exists (will fail in FaceLandmarker.create)
+        return candidate_paths[0]
+    
+    def _get_face_landmarks(self, rgb_frame):
+        """Get face landmarks from frame - handles both APIs"""
+        if self._mediapipe_mode == "solutions":
+            results = self.face_mesh.process(rgb_frame)
+            if results.multi_face_landmarks:
+                return results.multi_face_landmarks[0].landmark
+            return None
+        elif self._mediapipe_mode == "tasks":
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
+            results = self.face_mesh.detect(mp_image)
+            if results.face_landmarks and len(results.face_landmarks) > 0:
+                return results.face_landmarks[0]
+            return None
+        return None
+    
     def calculate_ear(
         self,
         landmarks: List[Tuple[float, float]],
@@ -356,11 +420,11 @@ class EyeTracker:
         # Convert BGR to RGB for MediaPipe
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         
-        # Process with MediaPipe
-        results = self.face_mesh.process(rgb_frame)
+        # Get face landmarks using appropriate API
+        face_landmarks = self._get_face_landmarks(rgb_frame)
         
         # No face detected
-        if not results.multi_face_landmarks:
+        if face_landmarks is None:
             return DrowsinessState(
                 ear_left=0.0,
                 ear_right=0.0,
@@ -376,11 +440,10 @@ class EyeTracker:
                 timestamp=current_time
             )
         
-        # Get landmarks
-        face_landmarks = results.multi_face_landmarks[0]
+        # Convert landmarks to pixel coordinates
         landmarks = [
             (int(lm.x * w), int(lm.y * h))
-            for lm in face_landmarks.landmark
+            for lm in face_landmarks
         ]
         
         # Calculate EAR for both eyes
