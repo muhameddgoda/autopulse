@@ -354,9 +354,9 @@ The CV system supports **MediaPipe 0.10+** (Tasks API) for face landmark detecti
 
 - [x] Real-time drowsiness detection
 - [x] Hybrid ML scoring system
-- [ ] Anomaly detection (Isolation Forest)
+- [x] Anomaly detection (Isolation Forest)
 - [ ] Failure prediction timeline
-- [ ] Enhanced head pose distraction detection
+- [x] Enhanced head pose distraction detection
 - [ ] PDF report generation
 - [ ] Mobile companion app
 - [ ] Cloud deployment (Railway/Vercel)
